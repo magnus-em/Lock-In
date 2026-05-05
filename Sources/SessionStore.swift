@@ -96,7 +96,60 @@ class SessionStore: ObservableObject {
         sessions.filter { $0.type == .work }.count
     }
 
+    var bestStreak: Int {
+        let calendar = Calendar.current
+        let activeDays = Set(sessions
+            .filter { $0.type == .work }
+            .map { calendar.startOfDay(for: $0.startTime) }
+        ).sorted()
+
+        guard !activeDays.isEmpty else { return 0 }
+
+        var best = 1
+        var current = 1
+        for i in 1..<activeDays.count {
+            let diff = calendar.dateComponents([.day], from: activeDays[i-1], to: activeDays[i]).day ?? 0
+            if diff == 1 {
+                current += 1
+                if current > best { best = current }
+            } else if diff > 1 {
+                current = 1
+            }
+        }
+        return max(best, currentStreak)
+    }
+
+    var bestDayMinutes: Double {
+        let calendar = Calendar.current
+        var dailyTotals: [Date: Double] = [:]
+        for session in sessions where session.type == .work {
+            let day = calendar.startOfDay(for: session.startTime)
+            dailyTotals[day, default: 0] += session.durationMinutes
+        }
+        return dailyTotals.values.max() ?? 0
+    }
+
     // MARK: - Charts
+
+    /// Returns (date, minutes) for the last `weeks` calendar weeks, starting on Sunday.
+    /// minutes == -1 means a future date (render as empty).
+    func heatmapData(weeks: Int) -> [(date: Date, minutes: Double)] {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let weekday = calendar.component(.weekday, from: today) // 1=Sun … 7=Sat
+        let thisSunday = calendar.date(byAdding: .day, value: -(weekday - 1), to: today)!
+        let startDate = calendar.date(byAdding: .weekOfYear, value: -(weeks - 1), to: thisSunday)!
+
+        return (0..<(weeks * 7)).map { offset in
+            let date = calendar.date(byAdding: .day, value: offset, to: startDate)!
+            guard date <= today else { return (date: date, minutes: -1) }
+            let dayEnd = calendar.date(byAdding: .day, value: 1, to: date)!
+            let mins = sessions.filter {
+                $0.type == .work && $0.startTime >= date && $0.startTime < dayEnd
+            }.reduce(0.0) { $0 + $1.durationMinutes }
+            return (date: date, minutes: mins)
+        }
+    }
 
     func dailySummaries(last days: Int) -> [DailySummary] {
         let calendar = Calendar.current
@@ -119,6 +172,16 @@ class SessionStore: ObservableObject {
                 sessionCount: daySessions.count
             )
         }
+    }
+
+    /// Total work minutes grouped by label, sorted descending. Includes all historical labels.
+    func minutesByTag() -> [(tag: String, minutes: Double)] {
+        var dict: [String: Double] = [:]
+        for session in sessions where session.type == .work {
+            guard let label = session.label, !label.isEmpty else { continue }
+            dict[label, default: 0] += session.durationMinutes
+        }
+        return dict.map { (tag: $0.key, minutes: $0.value) }.sorted { $0.minutes > $1.minutes }
     }
 
     func weeklyAverage() -> Double {

@@ -2,11 +2,11 @@
 import PackageDescription
 
 let package = Package(
-    name: "LockIn",
+    name: "Focus",
     platforms: [.macOS(.v14)],
     targets: [
         .executableTarget(
-            name: "LockIn",
+            name: "Focus",
             path: "Sources"
         )
     ]

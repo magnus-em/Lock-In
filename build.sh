@@ -1,14 +1,18 @@
 #!/bin/bash
 set -e
 
-echo "Building Lock-In..."
+echo "Building Focus..."
 swift build -c release
 
-APP_DIR="LockIn.app/Contents"
+APP_DIR="Focus.app/Contents"
 mkdir -p "$APP_DIR/MacOS"
 mkdir -p "$APP_DIR/Resources"
 
-cp .build/release/LockIn "$APP_DIR/MacOS/"
+cp .build/release/Focus "$APP_DIR/MacOS/"
+
+# Regenerate and embed app icon
+swift make_icon.swift > /dev/null
+iconutil -c icns /tmp/AppIcon.iconset -o "$APP_DIR/Resources/AppIcon.icns"
 
 cat > "$APP_DIR/Info.plist" << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -16,19 +20,21 @@ cat > "$APP_DIR/Info.plist" << 'EOF'
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Lock-In</string>
+    <string>Focus</string>
     <key>CFBundleDisplayName</key>
-    <string>Lock-In</string>
+    <string>Focus</string>
     <key>CFBundleIdentifier</key>
-    <string>com.lockin.app</string>
+    <string>com.focus.app</string>
     <key>CFBundleVersion</key>
     <string>1.0</string>
     <key>CFBundleShortVersionString</key>
     <string>1.0</string>
     <key>CFBundleExecutable</key>
-    <string>LockIn</string>
+    <string>Focus</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>LSUIElement</key>
     <true/>
     <key>LSMinimumSystemVersion</key>
@@ -40,7 +46,7 @@ EOF
 echo ""
 echo "Build complete!"
 echo ""
-echo "  Run directly:  .build/release/LockIn"
-echo "  Or use app:    open LockIn.app"
+echo "  Run directly:  .build/release/Focus"
+echo "  Or use app:    open Focus.app"
 echo ""
-echo "  To install:    cp -r LockIn.app /Applications/"
+echo "  To install:    cp -r Focus.app /Applications/"

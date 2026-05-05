@@ -5,12 +5,14 @@ struct WorkSession: Codable, Identifiable {
     let startTime: Date
     let durationMinutes: Double
     let type: SessionType
+    var label: String?
 
-    init(startTime: Date, durationMinutes: Double, type: SessionType) {
+    init(startTime: Date, durationMinutes: Double, type: SessionType, label: String? = nil) {
         self.id = UUID()
         self.startTime = startTime
         self.durationMinutes = durationMinutes
         self.type = type
+        self.label = label
     }
 
     enum SessionType: String, Codable {

@@ -34,6 +34,9 @@ class AppSettings: ObservableObject {
     @Published var blockedSites: [String] {
         didSet { UserDefaults.standard.set(blockedSites, forKey: "blockedSites") }
     }
+    @Published var tags: [String] {
+        didSet { UserDefaults.standard.set(tags, forKey: "tags") }
+    }
 
     init() {
         let d = UserDefaults.standard
@@ -60,5 +63,6 @@ class AppSettings: ObservableObject {
         siteBlockingEnabled = d.bool(forKey: "siteBlockingEnabled")
         blockDuringBreaks = d.bool(forKey: "blockDuringBreaks")
         blockedSites = d.stringArray(forKey: "blockedSites") ?? []
+        tags = d.stringArray(forKey: "tags") ?? []
     }
 }

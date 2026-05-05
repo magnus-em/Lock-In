@@ -11,6 +11,15 @@ class TimerManager: ObservableObject {
     @Published var workSessionsCompleted: Int = 0
     @Published var isBlockingActive = false
 
+    // Label for the current / upcoming session
+    @Published var currentLabel: String = ""
+    // Label of the session that just finished (shown in the completion panel)
+    @Published var lastCompletedLabel: String? = nil
+
+    // Flow-decision state
+    @Published var isAwaitingFlowDecision = false
+    @Published var flowDecisionCountdown = 10
+
     enum Phase: String {
         case work = "Focus"
         case shortBreak = "Short Break"
@@ -18,33 +27,24 @@ class TimerManager: ObservableObject {
     }
 
     private var timer: AnyCancellable?
+    private var flowCountdownSubscription: AnyCancellable?
     private var sessionStartTime: Date?
     private var elapsedBeforePause: TimeInterval = 0
     private var lastResumeTime: Date?
     private var settingsSubscriptions = Set<AnyCancellable>()
+    private let completionPanel = CompletionPanel()
 
     var sessionStore: SessionStore?
     var settings: AppSettings? {
         didSet { observeSettingsChanges() }
     }
 
-    // MARK: - Computed durations from settings
+    // MARK: - Computed durations
 
-    private var workDuration: TimeInterval {
-        (settings?.workMinutes ?? 25) * 60
-    }
-
-    private var shortBreakDuration: TimeInterval {
-        (settings?.shortBreakMinutes ?? 5) * 60
-    }
-
-    private var longBreakDuration: TimeInterval {
-        (settings?.longBreakMinutes ?? 15) * 60
-    }
-
-    private var sessionsBeforeLongBreak: Int {
-        settings?.sessionsBeforeLongBreak ?? 4
-    }
+    private var workDuration: TimeInterval { (settings?.workMinutes ?? 25) * 60 }
+    private var shortBreakDuration: TimeInterval { (settings?.shortBreakMinutes ?? 5) * 60 }
+    private var longBreakDuration: TimeInterval { (settings?.longBreakMinutes ?? 15) * 60 }
+    private var sessionsBeforeLongBreak: Int { settings?.sessionsBeforeLongBreak ?? 4 }
 
     init() {
         self.totalTime = 25 * 60
@@ -52,7 +52,6 @@ class TimerManager: ObservableObject {
         requestNotificationPermission()
     }
 
-    /// Call after connecting settings to sync initial durations
     func applySettings() {
         guard !isRunning && elapsedBeforePause == 0 else { return }
         setTimeForCurrentPhase()
@@ -67,21 +66,13 @@ class TimerManager: ObservableObject {
 
     var timeString: String {
         let total = Int(timeRemaining)
-        let minutes = total / 60
-        let seconds = total % 60
-        return String(format: "%02d:%02d", minutes, seconds)
+        return String(format: "%02d:%02d", total / 60, total % 60)
     }
 
-    /// Whether the timer is actively counting or paused mid-session
-    var isActive: Bool {
-        isRunning || timeRemaining < totalTime
-    }
+    var isActive: Bool { isRunning || timeRemaining < totalTime }
 
     var menuBarTimeText: String {
-        if !isRunning {
-            return "⏸ \(timeString)"
-        }
-        return timeString
+        isRunning ? timeString : "⏸ \(timeString)"
     }
 
     var currentCyclePosition: Int {
@@ -91,16 +82,12 @@ class TimerManager: ObservableObject {
     // MARK: - Controls
 
     func start() {
-        if sessionStartTime == nil {
-            sessionStartTime = Date()
-        }
+        if sessionStartTime == nil { sessionStartTime = Date() }
         lastResumeTime = Date()
         isRunning = true
         timer = Timer.publish(every: 0.5, on: .main, in: .common)
             .autoconnect()
-            .sink { [weak self] _ in
-                self?.tick()
-            }
+            .sink { [weak self] _ in self?.tick() }
         updateBlocking()
     }
 
@@ -115,23 +102,42 @@ class TimerManager: ObservableObject {
     }
 
     func reset() {
+        if isAwaitingFlowDecision {
+            cancelFlowDecision()
+            setTimeForCurrentPhase()
+            unblockIfNeeded()
+            return
+        }
+
+        var elapsed = elapsedBeforePause
+        if let resumeTime = lastResumeTime { elapsed += Date().timeIntervalSince(resumeTime) }
+
         timer?.cancel()
         timer = nil
         isRunning = false
+
+        if elapsed >= 60, currentPhase == .work, let start = sessionStartTime {
+            sessionStore?.addSession(WorkSession(
+                startTime: start,
+                durationMinutes: elapsed / 60.0,
+                type: .work,
+                label: currentLabel.isEmpty ? nil : currentLabel
+            ))
+        }
+
+        currentLabel = ""
         elapsedBeforePause = 0
         lastResumeTime = nil
         sessionStartTime = nil
         setTimeForCurrentPhase()
-        // Always unblock on full reset
-        if isBlockingActive {
-            isBlockingActive = false
-            DispatchQueue.global(qos: .userInitiated).async {
-                SiteBlocker.unblockAll()
-            }
-        }
+        unblockIfNeeded()
     }
 
     func skip() {
+        if isAwaitingFlowDecision {
+            takeBreak()
+            return
+        }
         timer?.cancel()
         timer = nil
         isRunning = false
@@ -142,16 +148,62 @@ class TimerManager: ObservableObject {
         updateBlocking()
     }
 
-    // MARK: - Private
+    func adjustDuration(by minutes: Double) {
+        let newRemaining = timeRemaining + minutes * 60
+        guard newRemaining > 5 else { completePhase(); return }
+        totalTime = max(60, totalTime + minutes * 60)
+        timeRemaining = newRemaining
+    }
+
+    func setSessionDuration(_ minutes: Double) {
+        guard !isActive else { return }
+        totalTime = minutes * 60
+        timeRemaining = minutes * 60
+    }
+
+    // MARK: - Flow decision
+
+    func keepGoing() {
+        cancelFlowDecision()
+        workSessionsCompleted += 1
+        currentLabel = ""
+        setTimeForCurrentPhase()
+        start()
+    }
+
+    func takeBreak() {
+        cancelFlowDecision()
+        currentLabel = ""
+        advancePhase()
+        updateBlocking()
+        handleAutoStart()
+    }
+
+    private func cancelFlowDecision() {
+        isAwaitingFlowDecision = false
+        flowCountdownSubscription?.cancel()
+        flowCountdownSubscription = nil
+        completionPanel.dismiss()
+    }
+
+    private func startFlowCountdown() {
+        flowDecisionCountdown = 10
+        flowCountdownSubscription = Timer.publish(every: 1, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.flowDecisionCountdown -= 1
+                if self.flowDecisionCountdown <= 0 { self.takeBreak() }
+            }
+    }
+
+    // MARK: - Private timer logic
 
     private func tick() {
         guard let resumeTime = lastResumeTime else { return }
-        let currentElapsed = elapsedBeforePause + Date().timeIntervalSince(resumeTime)
-        timeRemaining = max(0, totalTime - currentElapsed)
-
-        if timeRemaining <= 0 {
-            completePhase()
-        }
+        let elapsed = elapsedBeforePause + Date().timeIntervalSince(resumeTime)
+        timeRemaining = max(0, totalTime - elapsed)
+        if timeRemaining <= 0 { completePhase() }
     }
 
     private func completePhase() {
@@ -159,49 +211,36 @@ class TimerManager: ObservableObject {
         timer = nil
         isRunning = false
 
-        // Record the completed session
         if let start = sessionStartTime {
             let sessionType: WorkSession.SessionType = switch currentPhase {
             case .work: .work
             case .shortBreak: .shortBreak
             case .longBreak: .longBreak
             }
-            let session = WorkSession(
+            sessionStore?.addSession(WorkSession(
                 startTime: start,
                 durationMinutes: totalTime / 60.0,
-                type: sessionType
-            )
-            sessionStore?.addSession(session)
+                type: sessionType,
+                label: currentLabel.isEmpty ? nil : currentLabel
+            ))
         }
 
         elapsedBeforePause = 0
         lastResumeTime = nil
         sessionStartTime = nil
 
-        // Notify user
         sendNotification()
-        if settings?.soundEnabled ?? true {
-            NSSound(named: "Glass")?.play()
-        }
+        if settings?.soundEnabled ?? true { NSSound(named: "Glass")?.play() }
 
-        // Move to next phase
-        advancePhase()
-        updateBlocking()
-
-        // Auto-start if enabled
-        if let settings = settings {
-            let shouldAutoStart: Bool
-            switch currentPhase {
-            case .work:
-                shouldAutoStart = settings.autoStartWork
-            case .shortBreak, .longBreak:
-                shouldAutoStart = settings.autoStartBreaks
-            }
-            if shouldAutoStart {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                    self?.start()
-                }
-            }
+        if currentPhase == .work {
+            lastCompletedLabel = currentLabel.isEmpty ? nil : currentLabel
+            isAwaitingFlowDecision = true
+            startFlowCountdown()
+            completionPanel.show(timer: self)
+        } else {
+            advancePhase()
+            updateBlocking()
+            handleAutoStart()
         }
     }
 
@@ -209,11 +248,7 @@ class TimerManager: ObservableObject {
         switch currentPhase {
         case .work:
             workSessionsCompleted += 1
-            if workSessionsCompleted % sessionsBeforeLongBreak == 0 {
-                currentPhase = .longBreak
-            } else {
-                currentPhase = .shortBreak
-            }
+            currentPhase = workSessionsCompleted % sessionsBeforeLongBreak == 0 ? .longBreak : .shortBreak
         case .shortBreak, .longBreak:
             currentPhase = .work
         }
@@ -222,113 +257,95 @@ class TimerManager: ObservableObject {
 
     private func setTimeForCurrentPhase() {
         switch currentPhase {
-        case .work:
-            totalTime = workDuration
-        case .shortBreak:
-            totalTime = shortBreakDuration
-        case .longBreak:
-            totalTime = longBreakDuration
+        case .work:      totalTime = workDuration
+        case .shortBreak: totalTime = shortBreakDuration
+        case .longBreak:  totalTime = longBreakDuration
         }
         timeRemaining = totalTime
     }
 
-    private func requestNotificationPermission() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    private func handleAutoStart() {
+        guard let settings else { return }
+        let should: Bool = switch currentPhase {
+        case .work: settings.autoStartWork
+        case .shortBreak, .longBreak: settings.autoStartBreaks
+        }
+        if should {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in self?.start() }
+        }
     }
 
-    // MARK: - Site Blocking
+    private func unblockIfNeeded() {
+        guard isBlockingActive else { return }
+        isBlockingActive = false
+        DispatchQueue.global(qos: .userInitiated).async { SiteBlocker.unblockAll() }
+    }
 
-    /// Watch for changes to blocking-related settings and re-apply mid-session
+    // MARK: - Site blocking
+
     private func observeSettingsChanges() {
         settingsSubscriptions.removeAll()
-        guard let settings = settings else { return }
+        guard let settings else { return }
 
-        // Debounce all blocking-related changes (0.8s) so rapid edits
-        // (e.g. adding multiple domains) coalesce into one blocking call
         settings.$blockedSites
-            .dropFirst()
-            .removeDuplicates()
+            .dropFirst().removeDuplicates()
             .debounce(for: .milliseconds(800), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.reapplyBlockingIfNeeded() }
             .store(in: &settingsSubscriptions)
 
         settings.$siteBlockingEnabled
-            .dropFirst()
-            .removeDuplicates()
+            .dropFirst().removeDuplicates()
             .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.reapplyBlockingIfNeeded() }
             .store(in: &settingsSubscriptions)
 
         settings.$blockDuringBreaks
-            .dropFirst()
-            .removeDuplicates()
+            .dropFirst().removeDuplicates()
             .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.reapplyBlockingIfNeeded() }
             .store(in: &settingsSubscriptions)
     }
 
-    /// Called when settings change mid-session — forces a full re-apply
     private func reapplyBlockingIfNeeded() {
         guard isActive else { return }
-        // Reset flag so updateBlocking will re-apply with the new domain list
-        if isBlockingActive {
-            isBlockingActive = false
-        }
+        if isBlockingActive { isBlockingActive = false }
         updateBlocking()
     }
 
     func updateBlocking() {
-        guard let settings = settings,
-              settings.siteBlockingEnabled,
-              !settings.blockedSites.isEmpty else {
-            if isBlockingActive {
-                isBlockingActive = false
-                DispatchQueue.global(qos: .userInitiated).async {
-                    SiteBlocker.unblockAll()
-                }
-            }
+        guard let settings, settings.siteBlockingEnabled, !settings.blockedSites.isEmpty else {
+            unblockIfNeeded()
             return
         }
-
-        let shouldBlock: Bool
-        switch currentPhase {
-        case .work:
-            shouldBlock = isActive
-        case .shortBreak, .longBreak:
-            shouldBlock = settings.blockDuringBreaks && isActive
+        let shouldBlock: Bool = switch currentPhase {
+        case .work: isActive
+        case .shortBreak, .longBreak: settings.blockDuringBreaks && isActive
         }
-
         if shouldBlock && !isBlockingActive {
             isBlockingActive = true
             let domains = settings.blockedSites
-            DispatchQueue.global(qos: .userInitiated).async {
-                SiteBlocker.block(domains: domains)
-            }
+            DispatchQueue.global(qos: .userInitiated).async { SiteBlocker.block(domains: domains) }
         } else if !shouldBlock && isBlockingActive {
-            isBlockingActive = false
-            DispatchQueue.global(qos: .userInitiated).async {
-                SiteBlocker.unblockAll()
-            }
+            unblockIfNeeded()
         }
+    }
+
+    // MARK: - Notifications
+
+    private func requestNotificationPermission() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
     private func sendNotification() {
         let content = UNMutableNotificationContent()
-        content.title = "Lock-In"
-        // Notification is about the phase that just COMPLETED (before advancePhase)
-        switch currentPhase {
-        case .work:
-            content.body = "Great focus session! Time for a break."
-        case .shortBreak, .longBreak:
-            content.body = "Break's over — ready to focus?"
+        content.title = "Focus"
+        content.body = switch currentPhase {
+        case .work: "Great session! Keep going or take a break?"
+        case .shortBreak, .longBreak: "Break's over — ready to focus?"
         }
         content.sound = .default
-
-        let request = UNNotificationRequest(
-            identifier: UUID().uuidString,
-            content: content,
-            trigger: nil
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         )
-        UNUserNotificationCenter.current().add(request)
     }
 }

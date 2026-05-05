@@ -7,7 +7,8 @@ enum SiteBlocker {
     private static let domainFilePath = "/tmp/focustimer_domains.txt"
     private static let pfRulesPath = "/tmp/focustimer_pf.rules"
     private static let pfAnchor = "com.focustimer"
-    private static let marker = "# LockIn"
+    private static let marker = "# FocusTimer"
+    private static let helperVersion = "v2" // bump to force-reinstall outdated helper
 
     // Well-known DNS-over-HTTPS server IPs.
     // Blocking port 443 to these forces Chrome to use system DNS (which reads /etc/hosts).
@@ -24,8 +25,11 @@ enum SiteBlocker {
     // MARK: - Setup
 
     static var isSetUp: Bool {
-        FileManager.default.fileExists(atPath: helperPath) &&
-        FileManager.default.fileExists(atPath: sudoersPath)
+        guard FileManager.default.fileExists(atPath: helperPath),
+              FileManager.default.fileExists(atPath: sudoersPath) else { return false }
+        // Also check that the installed helper matches the current version
+        let installed = (try? String(contentsOfFile: helperPath, encoding: .utf8)) ?? ""
+        return installed.contains("# \(helperVersion)")
     }
 
     @discardableResult
@@ -270,9 +274,10 @@ enum SiteBlocker {
     private static func helperScriptContent() -> String {
         """
         #!/bin/bash
+        # v2
         set -euo pipefail
 
-        MARKER="# LockIn"
+        MARKER="# FocusTimer"
         HOSTS="/etc/hosts"
         DOMAIN_FILE="/tmp/focustimer_domains.txt"
         PF_RULES="/tmp/focustimer_pf.rules"

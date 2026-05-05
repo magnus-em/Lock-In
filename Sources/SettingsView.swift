@@ -21,7 +21,8 @@ struct SettingsView: View {
 
                 // Goal
                 SectionLabel("DAILY GOAL")
-                IntRow(label: "Target Sessions", value: $settings.dailyGoal, range: 1...20, suffix: "")
+                IntRow(label: "Target Sessions", value: $settings.dailyGoal, range: 0...20, suffix: "",
+                       zeroLabel: "Off")
 
                 Divider()
 
@@ -40,6 +41,32 @@ struct SettingsView: View {
                 ToggleRow(label: "Block distracting sites", isOn: $settings.siteBlockingEnabled)
 
                 if settings.siteBlockingEnabled {
+                    // Setup status indicator
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(SiteBlocker.isSetUp ? Color.green : Color.orange)
+                            .frame(width: 7, height: 7)
+                        Text(SiteBlocker.isSetUp ? "Helper installed" : "Helper not installed — tap to set up")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        if !SiteBlocker.isSetUp {
+                            Button("Set Up") {
+                                DispatchQueue.global(qos: .userInitiated).async { SiteBlocker.setUp() }
+                            }
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color(red: 0.96, green: 0.36, blue: 0.36))
+                            .buttonStyle(.plain)
+                        } else {
+                            Button("Re-install") {
+                                DispatchQueue.global(qos: .userInitiated).async { SiteBlocker.setUp() }
+                            }
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                            .buttonStyle(.plain)
+                        }
+                    }
+
                     ToggleRow(label: "Block during breaks too", isOn: $settings.blockDuringBreaks)
                     BlockedSitesView(settings: settings)
                         .padding(.top, 2)
@@ -156,15 +183,21 @@ private struct IntRow: View {
     @Binding var value: Int
     let range: ClosedRange<Int>
     var suffix: String = ""
+    var zeroLabel: String? = nil
+
+    private var display: String {
+        if value == 0, let z = zeroLabel { return z }
+        return suffix.isEmpty ? "\(value)" : "\(value) \(suffix)"
+    }
 
     var body: some View {
         HStack {
             Text(label)
                 .font(.system(size: 12, weight: .medium))
             Spacer()
-            Text(suffix.isEmpty ? "\(value)" : "\(value) \(suffix)")
+            Text(display)
                 .font(.system(size: 12, weight: .medium, design: .monospaced))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(value == 0 && zeroLabel != nil ? .tertiary : .secondary)
                 .frame(minWidth: 56, alignment: .trailing)
             Stepper("", value: $value, in: range)
                 .labelsHidden()

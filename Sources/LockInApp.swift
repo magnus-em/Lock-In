@@ -44,7 +44,7 @@ struct LockInApp: App {
             if timerManager.isActive {
                 Text(timerManager.menuBarTimeText)
             } else {
-                Image(systemName: "circle.fill")
+                Image(systemName: "lock.fill")
             }
         }
         .menuBarExtraStyle(.window)
@@ -73,7 +73,7 @@ struct PopoverContent: View {
                 TimerView(timer: timerManager, store: sessionStore, settings: settings)
                     .opacity(selectedTab == 0 ? 1 : 0)
                     .allowsHitTesting(selectedTab == 0)
-                StatsView(store: sessionStore)
+                StatsView(store: sessionStore, settings: settings)
                     .opacity(selectedTab == 1 ? 1 : 0)
                     .allowsHitTesting(selectedTab == 1)
                 SettingsView(settings: settings, timer: timerManager, store: sessionStore)
@@ -83,7 +83,7 @@ struct PopoverContent: View {
 
             Divider()
 
-            Button("Quit Lock-In") {
+            Button("Quit Focus") {
                 NSApplication.shared.terminate(nil)
             }
             .buttonStyle(.plain)
