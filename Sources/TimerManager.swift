@@ -20,6 +20,9 @@ class TimerManager: ObservableObject {
     @Published var isAwaitingFlowDecision = false
     @Published var flowDecisionCountdown = 10
 
+    // Commitment — set when session was started via the commitment modal
+    @Published var isCommitted = false
+
     enum Phase: String {
         case work = "Focus"
         case shortBreak = "Short Break"
@@ -91,6 +94,12 @@ class TimerManager: ObservableObject {
         updateBlocking()
     }
 
+    /// Start a session that was confirmed via the commitment modal.
+    func startCommitted() {
+        isCommitted = true
+        start()
+    }
+
     func pause() {
         if let resumeTime = lastResumeTime {
             elapsedBeforePause += Date().timeIntervalSince(resumeTime)
@@ -126,6 +135,7 @@ class TimerManager: ObservableObject {
         }
 
         currentLabel = ""
+        isCommitted = false
         elapsedBeforePause = 0
         lastResumeTime = nil
         sessionStartTime = nil
@@ -167,6 +177,7 @@ class TimerManager: ObservableObject {
         cancelFlowDecision()
         workSessionsCompleted += 1
         currentLabel = ""
+        isCommitted = false
         setTimeForCurrentPhase()
         start()
     }
@@ -234,6 +245,7 @@ class TimerManager: ObservableObject {
 
         if currentPhase == .work {
             lastCompletedLabel = currentLabel.isEmpty ? nil : currentLabel
+            isCommitted = false
             isAwaitingFlowDecision = true
             startFlowCountdown()
             completionPanel.show(timer: self)

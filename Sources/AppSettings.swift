@@ -37,6 +37,12 @@ class AppSettings: ObservableObject {
     @Published var tags: [String] {
         didSet { UserDefaults.standard.set(tags, forKey: "tags") }
     }
+    @Published var commitmentModeEnabled: Bool {
+        didSet { UserDefaults.standard.set(commitmentModeEnabled, forKey: "commitmentModeEnabled") }
+    }
+    @Published var commitmentVoiceEnabled: Bool {
+        didSet { UserDefaults.standard.set(commitmentVoiceEnabled, forKey: "commitmentVoiceEnabled") }
+    }
 
     init() {
         let d = UserDefaults.standard
@@ -51,6 +57,8 @@ class AppSettings: ObservableObject {
             "soundEnabled": true,
             "siteBlockingEnabled": false,
             "blockDuringBreaks": false,
+            "commitmentModeEnabled": false,
+            "commitmentVoiceEnabled": false,
         ])
         workMinutes = d.double(forKey: "workMinutes")
         shortBreakMinutes = d.double(forKey: "shortBreakMinutes")
@@ -64,5 +72,7 @@ class AppSettings: ObservableObject {
         blockDuringBreaks = d.bool(forKey: "blockDuringBreaks")
         blockedSites = d.stringArray(forKey: "blockedSites") ?? []
         tags = d.stringArray(forKey: "tags") ?? []
+        commitmentModeEnabled = d.bool(forKey: "commitmentModeEnabled")
+        commitmentVoiceEnabled = d.bool(forKey: "commitmentVoiceEnabled")
     }
 }

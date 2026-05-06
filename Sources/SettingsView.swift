@@ -74,6 +74,23 @@ struct SettingsView: View {
 
                 Divider()
 
+                // Commitment
+                SectionLabel("COMMITMENT")
+
+                ToggleRow(label: "Require commitment to start", isOn: $settings.commitmentModeEnabled)
+
+                if settings.commitmentModeEnabled {
+                    ToggleRow(label: "Record voice oath", isOn: $settings.commitmentVoiceEnabled)
+
+                    Text("Sign your name before each focus session. When you try to stop early, you'll be reminded of your commitment.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 2)
+                }
+
+                Divider()
+
                 // Reset
                 if showResetConfirm {
                     VStack(spacing: 8) {

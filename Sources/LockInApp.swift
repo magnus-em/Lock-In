@@ -5,6 +5,7 @@ struct LockInApp: App {
     @StateObject private var timerManager: TimerManager
     @StateObject private var sessionStore: SessionStore
     @StateObject private var settings: AppSettings
+    @StateObject private var commitment: CommitmentManager
 
     init() {
         let store = SessionStore()
@@ -17,6 +18,7 @@ struct LockInApp: App {
         _sessionStore = StateObject(wrappedValue: store)
         _settings = StateObject(wrappedValue: appSettings)
         _timerManager = StateObject(wrappedValue: timer)
+        _commitment = StateObject(wrappedValue: CommitmentManager())
 
         // Clean up any stale /etc/hosts entries from a previous crash
         SiteBlocker.cleanupIfNeeded()
@@ -38,7 +40,8 @@ struct LockInApp: App {
             PopoverContent(
                 timerManager: timerManager,
                 sessionStore: sessionStore,
-                settings: settings
+                settings: settings,
+                commitment: commitment
             )
         } label: {
             if timerManager.isActive {
@@ -55,6 +58,7 @@ struct PopoverContent: View {
     @ObservedObject var timerManager: TimerManager
     @ObservedObject var sessionStore: SessionStore
     @ObservedObject var settings: AppSettings
+    @ObservedObject var commitment: CommitmentManager
     @State private var selectedTab = 0
 
     var body: some View {
@@ -70,7 +74,7 @@ struct PopoverContent: View {
             .padding(.bottom, 2)
 
             ZStack(alignment: .top) {
-                TimerView(timer: timerManager, store: sessionStore, settings: settings)
+                TimerView(timer: timerManager, store: sessionStore, settings: settings, commitment: commitment)
                     .opacity(selectedTab == 0 ? 1 : 0)
                     .allowsHitTesting(selectedTab == 0)
                 StatsView(store: sessionStore, settings: settings)
