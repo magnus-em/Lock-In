@@ -16,11 +16,6 @@ struct TimerView: View {
         }
     }
 
-    private var goalProgress: Double {
-        guard settings.dailyGoal > 0 else { return 0 }
-        return min(1.0, store.todayWorkMinutes / 60.0 / Double(settings.dailyGoal))
-    }
-
     var body: some View {
         VStack(spacing: 10) {
             dayStatusRow
@@ -81,24 +76,13 @@ struct TimerView: View {
             }
 
             ZStack {
-                if settings.dailyGoal > 0 {
-                    Circle()
-                        .stroke(Color.secondary.opacity(0.08), lineWidth: 3)
-                        .frame(width: 156, height: 156)
-                    Circle()
-                        .trim(from: 0, to: goalProgress)
-                        .stroke(phaseColor.opacity(0.3), style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                        .frame(width: 156, height: 156)
-                        .rotationEffect(.degrees(-90))
-                }
-
                 Circle()
                     .stroke(phaseColor.opacity(0.12), lineWidth: 8)
-                    .frame(width: 136, height: 136)
+                    .frame(width: 140, height: 140)
                 Circle()
                     .trim(from: 0, to: timer.progress)
                     .stroke(phaseColor, style: StrokeStyle(lineWidth: 8, lineCap: .round))
-                    .frame(width: 136, height: 136)
+                    .frame(width: 140, height: 140)
                     .rotationEffect(.degrees(-90))
                     .animation(.linear(duration: 0.5), value: timer.progress)
 
@@ -189,6 +173,43 @@ struct TimerView: View {
 
             Divider().padding(.horizontal, 8)
 
+            if settings.dailyGoal > 0 {
+                let hoursToday = store.todayWorkMinutes / 60.0
+                let pct = min(1.0, hoursToday / Double(settings.dailyGoal))
+                let goalMet = hoursToday >= Double(settings.dailyGoal)
+                let barColor: Color = goalMet ? .green : phaseColor
+
+                VStack(spacing: 4) {
+                    HStack {
+                        Text("Daily Goal")
+                            .font(.system(size: 10, weight: .semibold))
+                            .tracking(0.6)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(String(format: "%.1f / %dh", hoursToday, settings.dailyGoal))
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(goalMet ? Color.green : .primary)
+                            .contentTransition(.numericText())
+                        if goalMet {
+                            Image(systemName: "checkmark.seal.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.green)
+                        }
+                    }
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.secondary.opacity(0.12))
+                            Capsule()
+                                .fill(barColor)
+                                .frame(width: geo.size.width * CGFloat(pct))
+                                .animation(.spring(response: 0.5), value: pct)
+                        }
+                    }
+                    .frame(height: 5)
+                }
+                .padding(.horizontal, 4)
+            }
+
             HStack {
                 VStack(spacing: 2) {
                     Text(formatMinutes(store.todayWorkMinutes))
@@ -211,30 +232,15 @@ struct TimerView: View {
                 }
                 .frame(maxWidth: .infinity)
 
-                if settings.dailyGoal > 0 {
-                    let hoursToday = store.todayWorkMinutes / 60.0
-                    let goalMet = hoursToday >= Double(settings.dailyGoal)
-                    VStack(spacing: 2) {
-                        Text(String(format: "%.1f/\(settings.dailyGoal)h", hoursToday))
-                            .font(.system(size: 18, weight: .bold, design: .rounded))
-                            .foregroundStyle(goalMet ? Color.green : Color.primary)
-                            .contentTransition(.numericText())
-                        Text("Goal")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(goalMet ? Color.green : Color.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                } else {
-                    VStack(spacing: 2) {
-                        Text("\(store.currentStreak)d")
-                            .font(.system(size: 18, weight: .bold, design: .rounded))
-                            .foregroundStyle(store.currentStreak > 0 ? .orange : .secondary)
-                        Text("Streak")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
+                VStack(spacing: 2) {
+                    Text("\(store.currentStreak)d")
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundStyle(store.currentStreak > 0 ? .orange : .secondary)
+                    Text("Streak")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
                 }
+                .frame(maxWidth: .infinity)
             }
         }
         .padding(.vertical, 10)
