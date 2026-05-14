@@ -11,28 +11,19 @@ class TimerManager: ObservableObject {
     @Published var workSessionsCompleted: Int = 0
     @Published var isBlockingActive = false
 
-    // Label for the current / upcoming session
     @Published var currentLabel: String = ""
-    // Label of the session that just finished (shown in the completion panel)
     @Published var lastCompletedLabel: String? = nil
 
-    // Flow-decision state
-    @Published var isAwaitingFlowDecision = false
-    @Published var flowDecisionCountdown = 10
-
-    // Pause auto-finalize state
     @Published var pauseStartedAt: Date? = nil
     @Published var pauseRemainingSeconds: Double = 0
     private var pauseStaleSubscription: AnyCancellable?
 
-    enum Phase: String {
-        case work = "Focus"
-        case shortBreak = "Short Break"
-        case longBreak = "Long Break"
+    enum Phase {
+        case work, shortBreak, longBreak
+        var displayName: String { self == .work ? "Focus" : "Break" }
     }
 
     private var timer: AnyCancellable?
-    private var flowCountdownSubscription: AnyCancellable?
     private var sessionStartTime: Date?
     private var elapsedBeforePause: TimeInterval = 0
     private var lastResumeTime: Date?
@@ -42,16 +33,10 @@ class TimerManager: ObservableObject {
     private static let checkpointKey = "timerCheckpoint"
 
     var sessionStore: SessionStore?
-    var settings: AppSettings? {
-        didSet { observeSettingsChanges() }
-    }
-
-    // MARK: - Computed durations
+    var settings: AppSettings? { didSet { observeSettingsChanges() } }
 
     private var workDuration: TimeInterval { (settings?.workMinutes ?? 25) * 60 }
-    private var shortBreakDuration: TimeInterval { (settings?.shortBreakMinutes ?? 5) * 60 }
-    private var longBreakDuration: TimeInterval { (settings?.longBreakMinutes ?? 15) * 60 }
-    private var sessionsBeforeLongBreak: Int { settings?.sessionsBeforeLongBreak ?? 4 }
+    private var breakDuration: TimeInterval { (settings?.shortBreakMinutes ?? 10) * 60 }
 
     init() {
         self.totalTime = 25 * 60
@@ -77,13 +62,10 @@ class TimerManager: ObservableObject {
     }
 
     var isActive: Bool { isRunning || timeRemaining < totalTime }
+    var isOnBreak: Bool { currentPhase != .work }
 
     var menuBarTimeText: String {
         isRunning ? timeString : "⏸ \(timeString)"
-    }
-
-    var currentCyclePosition: Int {
-        (workSessionsCompleted % sessionsBeforeLongBreak) + 1
     }
 
     // MARK: - Controls
@@ -110,13 +92,111 @@ class TimerManager: ObservableObject {
         timer?.cancel()
         timer = nil
         saveCheckpoint()
-        // Only arm auto-finalize for work phases that have meaningful elapsed time
         if currentPhase == .work && sessionStartTime != nil {
             startPauseGrace()
         }
     }
 
-    // MARK: - Pause auto-finalize
+    func toggleRunPause() {
+        if isRunning { pause() }
+        else if isActive { start() }
+    }
+
+    func reset() {
+        cancelPauseGrace()
+        var elapsed = elapsedBeforePause
+        if let resumeTime = lastResumeTime { elapsed += Date().timeIntervalSince(resumeTime) }
+        timer?.cancel()
+        timer = nil
+        isRunning = false
+
+        if elapsed >= 60, currentPhase == .work, let start = sessionStartTime {
+            sessionStore?.addSession(WorkSession(
+                startTime: start, durationMinutes: elapsed / 60.0,
+                type: .work, label: currentLabel.isEmpty ? nil : currentLabel
+            ))
+        }
+
+        currentLabel = ""
+        elapsedBeforePause = 0
+        lastResumeTime = nil
+        sessionStartTime = nil
+        clearCheckpoint()
+        currentPhase = .work
+        setTimeForCurrentPhase()
+        unblockIfNeeded()
+    }
+
+    func skip() {
+        cancelPauseGrace()
+        var elapsed = elapsedBeforePause
+        if let resumeTime = lastResumeTime { elapsed += Date().timeIntervalSince(resumeTime) }
+        timer?.cancel()
+        timer = nil
+        isRunning = false
+
+        if currentPhase == .work, elapsed >= 60, let start = sessionStartTime {
+            sessionStore?.addSession(WorkSession(
+                startTime: start, durationMinutes: elapsed / 60.0,
+                type: .work, label: currentLabel.isEmpty ? nil : currentLabel
+            ))
+        } else if isOnBreak, elapsed >= 300, let start = sessionStartTime {
+            sessionStore?.addSession(WorkSession(
+                startTime: start, durationMinutes: elapsed / 60.0, type: .shortBreak, label: nil
+            ))
+        }
+
+        currentLabel = ""
+        elapsedBeforePause = 0
+        lastResumeTime = nil
+        sessionStartTime = nil
+        clearCheckpoint()
+        currentPhase = .work
+        setTimeForCurrentPhase()
+        updateBlocking()
+    }
+
+    func startManualBreak(minutes: Double) {
+        cancelPauseGrace()
+        var elapsed = elapsedBeforePause
+        if let resumeTime = lastResumeTime { elapsed += Date().timeIntervalSince(resumeTime) }
+        timer?.cancel()
+        timer = nil
+        isRunning = false
+
+        if elapsed >= 60, currentPhase == .work, let start = sessionStartTime {
+            sessionStore?.addSession(WorkSession(
+                startTime: start, durationMinutes: elapsed / 60.0,
+                type: .work, label: currentLabel.isEmpty ? nil : currentLabel
+            ))
+        }
+
+        currentLabel = ""
+        elapsedBeforePause = 0
+        lastResumeTime = nil
+        sessionStartTime = nil
+        clearCheckpoint()
+        currentPhase = .shortBreak
+        totalTime = minutes * 60
+        timeRemaining = totalTime
+        updateBlocking()
+        start()
+    }
+
+    func adjustDuration(by minutes: Double) {
+        let newRemaining = timeRemaining + minutes * 60
+        guard newRemaining > 5 else { completePhase(); return }
+        totalTime = max(60, totalTime + minutes * 60)
+        timeRemaining = newRemaining
+    }
+
+    func setSessionDuration(_ minutes: Double) {
+        guard !isActive else { return }
+        totalTime = minutes * 60
+        timeRemaining = minutes * 60
+    }
+
+    // MARK: - Pause grace
 
     private var pauseGraceSeconds: Double {
         Double(max(1, settings?.pauseGraceMinutes ?? 10)) * 60
@@ -134,9 +214,7 @@ class TimerManager: ObservableObject {
         guard let started = pauseStartedAt else { return }
         let elapsed = Date().timeIntervalSince(started)
         pauseRemainingSeconds = max(0, pauseGraceSeconds - elapsed)
-        if pauseRemainingSeconds <= 0 {
-            finalizeStalePause()
-        }
+        if pauseRemainingSeconds <= 0 { finalizeStalePause() }
     }
 
     private func cancelPauseGrace() {
@@ -146,17 +224,13 @@ class TimerManager: ObservableObject {
         pauseRemainingSeconds = 0
     }
 
-    /// Save the partial work session and return to idle. Called when the
-    /// pause grace runs out — bathroom break safe, leaving the desk auto-ends.
     private func finalizeStalePause() {
         cancelPauseGrace()
         let elapsed = elapsedBeforePause
         if elapsed >= 60, currentPhase == .work, let start = sessionStartTime {
             sessionStore?.addSession(WorkSession(
-                startTime: start,
-                durationMinutes: elapsed / 60.0,
-                type: .work,
-                label: currentLabel.isEmpty ? nil : currentLabel
+                startTime: start, durationMinutes: elapsed / 60.0,
+                type: .work, label: currentLabel.isEmpty ? nil : currentLabel
             ))
         }
         currentLabel = ""
@@ -164,6 +238,7 @@ class TimerManager: ObservableObject {
         lastResumeTime = nil
         sessionStartTime = nil
         clearCheckpoint()
+        currentPhase = .work
         setTimeForCurrentPhase()
         unblockIfNeeded()
         sendStaleEndedNotification()
@@ -179,132 +254,7 @@ class TimerManager: ObservableObject {
         )
     }
 
-    /// Convenience for the global hotkey — toggle between running and paused
-    /// without affecting committed-sessions state. If timer is idle, no-op.
-    func toggleRunPause() {
-        if isRunning { pause() }
-        else if isActive { start() }
-    }
-
-    func reset() {
-        if isAwaitingFlowDecision {
-            cancelFlowDecision()
-            setTimeForCurrentPhase()
-            unblockIfNeeded()
-            return
-        }
-
-        cancelPauseGrace()
-
-        var elapsed = elapsedBeforePause
-        if let resumeTime = lastResumeTime { elapsed += Date().timeIntervalSince(resumeTime) }
-
-        timer?.cancel()
-        timer = nil
-        isRunning = false
-
-        if elapsed >= 60, currentPhase == .work, let start = sessionStartTime {
-            sessionStore?.addSession(WorkSession(
-                startTime: start,
-                durationMinutes: elapsed / 60.0,
-                type: .work,
-                label: currentLabel.isEmpty ? nil : currentLabel
-            ))
-        }
-
-        currentLabel = ""
-        elapsedBeforePause = 0
-        lastResumeTime = nil
-        sessionStartTime = nil
-        clearCheckpoint()
-        setTimeForCurrentPhase()
-        unblockIfNeeded()
-    }
-
-    func skip() {
-        if isAwaitingFlowDecision {
-            takeBreak()
-            return
-        }
-
-        cancelPauseGrace()
-
-        // Capture partial elapsed time so a skipped work session still counts.
-        var elapsed = elapsedBeforePause
-        if let resumeTime = lastResumeTime { elapsed += Date().timeIntervalSince(resumeTime) }
-
-        timer?.cancel()
-        timer = nil
-        isRunning = false
-
-        if elapsed >= 60, currentPhase == .work, let start = sessionStartTime {
-            sessionStore?.addSession(WorkSession(
-                startTime: start,
-                durationMinutes: elapsed / 60.0,
-                type: .work,
-                label: currentLabel.isEmpty ? nil : currentLabel
-            ))
-        }
-
-        currentLabel = ""
-        elapsedBeforePause = 0
-        lastResumeTime = nil
-        sessionStartTime = nil
-        clearCheckpoint()
-        advancePhase()
-        updateBlocking()
-    }
-
-    func adjustDuration(by minutes: Double) {
-        let newRemaining = timeRemaining + minutes * 60
-        guard newRemaining > 5 else { completePhase(); return }
-        totalTime = max(60, totalTime + minutes * 60)
-        timeRemaining = newRemaining
-    }
-
-    func setSessionDuration(_ minutes: Double) {
-        guard !isActive else { return }
-        totalTime = minutes * 60
-        timeRemaining = minutes * 60
-    }
-
-    // MARK: - Flow decision
-
-    func keepGoing() {
-        cancelFlowDecision()
-        workSessionsCompleted += 1
-        currentLabel = ""
-        setTimeForCurrentPhase()
-        start()
-    }
-
-    func takeBreak() {
-        cancelFlowDecision()
-        currentLabel = ""
-        advancePhase()
-        updateBlocking()
-        handleAutoStart()
-    }
-
-    private func cancelFlowDecision() {
-        isAwaitingFlowDecision = false
-        flowCountdownSubscription?.cancel()
-        flowCountdownSubscription = nil
-        completionPanel.dismiss()
-    }
-
-    private func startFlowCountdown() {
-        flowDecisionCountdown = 10
-        flowCountdownSubscription = Timer.publish(every: 1, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
-                guard let self else { return }
-                self.flowDecisionCountdown -= 1
-                if self.flowDecisionCountdown <= 0 { self.takeBreak() }
-            }
-    }
-
-    // MARK: - Private timer logic
+    // MARK: - Timer logic
 
     private func tick() {
         guard let resumeTime = lastResumeTime else { return }
@@ -312,7 +262,7 @@ class TimerManager: ObservableObject {
         timeRemaining = max(0, totalTime - elapsed)
         if timeRemaining <= 0 { completePhase(); return }
         tickCount += 1
-        if tickCount % 60 == 0 { saveCheckpoint() } // every 30 seconds
+        if tickCount % 60 == 0 { saveCheckpoint() }
     }
 
     private func completePhase() {
@@ -321,16 +271,10 @@ class TimerManager: ObservableObject {
         isRunning = false
 
         if let start = sessionStartTime {
-            let sessionType: WorkSession.SessionType = switch currentPhase {
-            case .work: .work
-            case .shortBreak: .shortBreak
-            case .longBreak: .longBreak
-            }
+            let type: WorkSession.SessionType = currentPhase == .work ? .work : .shortBreak
             sessionStore?.addSession(WorkSession(
-                startTime: start,
-                durationMinutes: totalTime / 60.0,
-                type: sessionType,
-                label: currentLabel.isEmpty ? nil : currentLabel
+                startTime: start, durationMinutes: totalTime / 60.0,
+                type: type, label: currentPhase == .work ? (currentLabel.isEmpty ? nil : currentLabel) : nil
             ))
         }
 
@@ -339,50 +283,46 @@ class TimerManager: ObservableObject {
         sessionStartTime = nil
         clearCheckpoint()
 
-        sendNotification()
         if settings?.soundEnabled ?? true { NSSound(named: "Glass")?.play() }
 
         if currentPhase == .work {
             lastCompletedLabel = currentLabel.isEmpty ? nil : currentLabel
-            isAwaitingFlowDecision = true
-            startFlowCountdown()
-            completionPanel.show(timer: self)
+            completionPanel.show(label: lastCompletedLabel)
+            currentLabel = ""
+            workSessionsCompleted += 1
+            sendNotification(breakStarting: settings?.autoBreakEnabled ?? true)
+            if settings?.autoBreakEnabled ?? true {
+                currentPhase = .shortBreak
+                totalTime = breakDuration
+                timeRemaining = totalTime
+                updateBlocking()
+                start()
+            } else {
+                currentPhase = .work
+                setTimeForCurrentPhase()
+                updateBlocking()
+            }
         } else {
-            advancePhase()
+            currentLabel = ""
+            currentPhase = .work
+            setTimeForCurrentPhase()
             updateBlocking()
+            sendNotification(breakStarting: false)
             handleAutoStart()
         }
     }
 
-    private func advancePhase() {
-        switch currentPhase {
-        case .work:
-            workSessionsCompleted += 1
-            currentPhase = workSessionsCompleted % sessionsBeforeLongBreak == 0 ? .longBreak : .shortBreak
-        case .shortBreak, .longBreak:
-            currentPhase = .work
-        }
-        setTimeForCurrentPhase()
-    }
-
     private func setTimeForCurrentPhase() {
         switch currentPhase {
-        case .work:      totalTime = workDuration
-        case .shortBreak: totalTime = shortBreakDuration
-        case .longBreak:  totalTime = longBreakDuration
+        case .work: totalTime = workDuration
+        case .shortBreak, .longBreak: totalTime = breakDuration
         }
         timeRemaining = totalTime
     }
 
     private func handleAutoStart() {
-        guard let settings else { return }
-        let should: Bool = switch currentPhase {
-        case .work: settings.autoStartWork
-        case .shortBreak, .longBreak: settings.autoStartBreaks
-        }
-        if should {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in self?.start() }
-        }
+        guard let settings, settings.autoStartWork else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in self?.start() }
     }
 
     private func unblockIfNeeded() {
@@ -424,13 +364,9 @@ class TimerManager: ObservableObject {
 
     func updateBlocking() {
         guard let settings, settings.siteBlockingEnabled, !settings.blockedSites.isEmpty else {
-            unblockIfNeeded()
-            return
+            unblockIfNeeded(); return
         }
-        let shouldBlock: Bool = switch currentPhase {
-        case .work: isActive
-        case .shortBreak, .longBreak: settings.blockDuringBreaks && isActive
-        }
+        let shouldBlock = isOnBreak ? (settings.blockDuringBreaks && isActive) : isActive
         if shouldBlock && !isBlockingActive {
             isBlockingActive = true
             let domains = settings.blockedSites
@@ -440,21 +376,17 @@ class TimerManager: ObservableObject {
         }
     }
 
-    // MARK: - Crash/kill recovery checkpoint
+    // MARK: - Checkpoint
 
     private func saveCheckpoint() {
-        guard currentPhase == .work, let start = sessionStartTime else {
-            clearCheckpoint(); return
-        }
+        guard currentPhase == .work, let start = sessionStartTime else { clearCheckpoint(); return }
         var data: [String: Any] = [
             "sessionStartTime": start.timeIntervalSince1970,
             "elapsedBeforePause": elapsedBeforePause,
             "totalTime": totalTime,
             "currentLabel": currentLabel
         ]
-        if let resume = lastResumeTime {
-            data["lastResumeTime"] = resume.timeIntervalSince1970
-        }
+        if let resume = lastResumeTime { data["lastResumeTime"] = resume.timeIntervalSince1970 }
         UserDefaults.standard.set(data, forKey: Self.checkpointKey)
     }
 
@@ -462,29 +394,21 @@ class TimerManager: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Self.checkpointKey)
     }
 
-    /// Called at launch. If the app was killed mid-session, saves the partial work time.
     func recoverPartialSession(into store: SessionStore) {
         guard let data = UserDefaults.standard.dictionary(forKey: Self.checkpointKey) else { return }
         clearCheckpoint()
-
         guard let startEpoch = data["sessionStartTime"] as? Double,
               let elapsed0 = data["elapsedBeforePause"] as? Double else { return }
-
         var elapsed = elapsed0
         if let resumeEpoch = data["lastResumeTime"] as? Double {
-            // It was running when killed — add time from last resume up to now
             elapsed += Date().timeIntervalSince(Date(timeIntervalSince1970: resumeEpoch))
         }
-        if let total = data["totalTime"] as? Double {
-            elapsed = min(elapsed, total)
-        }
+        if let total = data["totalTime"] as? Double { elapsed = min(elapsed, total) }
         guard elapsed >= 60 else { return }
-
         let label = data["currentLabel"] as? String
         store.addSession(WorkSession(
             startTime: Date(timeIntervalSince1970: startEpoch),
-            durationMinutes: elapsed / 60.0,
-            type: .work,
+            durationMinutes: elapsed / 60.0, type: .work,
             label: label?.isEmpty == false ? label : nil
         ))
     }
@@ -495,13 +419,14 @@ class TimerManager: ObservableObject {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
-    private func sendNotification() {
+    private func sendNotification(breakStarting: Bool) {
         let content = UNMutableNotificationContent()
         content.title = "Focus"
-        content.body = switch currentPhase {
-        case .work: "Great session! Keep going or take a break?"
-        case .shortBreak, .longBreak: "Break's over — ready to focus?"
-        }
+        content.body = breakStarting
+            ? "Session complete — \(Int((settings?.shortBreakMinutes ?? 10)))m break starting."
+            : currentPhase == .work
+                ? "Break over — ready to focus?"
+                : "Session complete."
         content.sound = .default
         UNUserNotificationCenter.current().add(
             UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)

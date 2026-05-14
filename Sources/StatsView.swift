@@ -77,29 +77,34 @@ struct StatsView: View {
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                 }
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("\(store.todaySessionCount)")
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
-                    Text("sessions")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
+                if store.todayBreakMinutes >= 1 {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(formatMinutes(store.todayBreakMinutes))
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                        Text("on break")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    }
                 }
                 Spacer()
             }
 
             if settings.dailyGoal > 0 {
-                let pct = min(1.0, Double(store.todaySessionCount) / Double(settings.dailyGoal))
+                let hoursToday = store.todayWorkMinutes / 60.0
+                let pct = min(1.0, hoursToday / Double(settings.dailyGoal))
+                let goalMet = pct >= 1.0
                 VStack(alignment: .leading, spacing: 3) {
                     HStack {
                         Text("Daily goal")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Text("\(store.todaySessionCount) / \(settings.dailyGoal)")
+                        Text(String(format: "%.1fh / %dh", hoursToday, settings.dailyGoal))
                             .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(goalMet ? Color.green : Color.secondary)
                     }
-                    ProgressBar(progress: pct, color: red)
+                    ProgressBar(progress: pct, color: goalMet ? .green : red)
                 }
             }
         }
@@ -166,6 +171,12 @@ struct StatsView: View {
             HStack(spacing: 10) {
                 MiniMetric(label: "Avg/day", value: formatMinutes(last / 7))
                 MiniMetric(label: "Avg session", value: formatMinutes(avgSession))
+                let consistency = store.consistencyScore(days: 14)
+                MiniMetric(
+                    label: "Consistency",
+                    value: "\(Int(consistency * 100))%",
+                    valueColor: consistency >= 0.8 ? .green : consistency >= 0.5 ? .orange : .red
+                )
             }
         }
         .padding(12)
@@ -316,12 +327,13 @@ struct StatsView: View {
     @ViewBuilder
     private var lifetimeRow: some View {
         HStack(spacing: 0) {
-            MiniStat(value: "\(store.totalWorkSessions)", label: "Sessions")
-            MiniStat(value: formatHours(store.totalWorkHours), label: "Hours")
-            MiniStat(value: "\(store.bestStreak)",
+            MiniStat(value: formatHours(store.totalWorkHours), label: "Total Hours")
+            MiniStat(value: formatHours(store.bestWeekMinutes / 60.0), label: "Best Week",
+                     icon: "crown.fill", iconColor: Color(red: 1.0, green: 0.75, blue: 0.2))
+            MiniStat(value: "\(store.bestStreak)d",
                      label: "Best Streak",
-                     icon: "trophy.fill",
-                     iconColor: Color(red: 1.0, green: 0.75, blue: 0.2))
+                     icon: "flame.fill",
+                     iconColor: .orange)
             MiniStat(value: formatMinutes(store.bestDayMinutes), label: "Best Day")
         }
     }
@@ -350,13 +362,14 @@ struct StatsView: View {
 private struct MiniMetric: View {
     let label: String
     let value: String
+    var valueColor: Color = Color(NSColor.secondaryLabelColor)
 
     var body: some View {
         HStack(spacing: 4) {
             Text(label).font(.system(size: 10)).foregroundStyle(.tertiary)
             Text(value)
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(valueColor)
         }
     }
 }

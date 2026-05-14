@@ -8,7 +8,11 @@ class SessionStore: ObservableObject {
 
     init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let appDir = appSupport.appendingPathComponent("LockIn")
+        let oldDir = appSupport.appendingPathComponent("LockIn")
+        let appDir = appSupport.appendingPathComponent("Focus")
+        if FileManager.default.fileExists(atPath: oldDir.path), !FileManager.default.fileExists(atPath: appDir.path) {
+            try? FileManager.default.moveItem(at: oldDir, to: appDir)
+        }
         try? FileManager.default.createDirectory(at: appDir, withIntermediateDirectories: true)
         fileURL = appDir.appendingPathComponent("sessions.json")
         load()
@@ -17,6 +21,13 @@ class SessionStore: ObservableObject {
     func addSession(_ session: WorkSession) {
         sessions.append(session)
         save()
+    }
+
+    func updateLabel(id: UUID, label: String?) {
+        if let i = sessions.firstIndex(where: { $0.id == id }) {
+            sessions[i].label = label
+            save()
+        }
     }
 
     func clearAllData() {
@@ -56,6 +67,13 @@ class SessionStore: ObservableObject {
 
     var todaySessionCount: Int {
         todayWorkSessions.count
+    }
+
+    var todayBreakMinutes: Double {
+        let calendar = Calendar.current
+        return sessions
+            .filter { $0.type.isBreak && calendar.isDateInToday($0.startTime) }
+            .reduce(0) { $0 + $1.durationMinutes }
     }
 
     // MARK: - Streaks
@@ -223,6 +241,39 @@ class SessionStore: ObservableObject {
         let start = cal.date(byAdding: .day, value: -13, to: cal.startOfDay(for: Date()))!
         let end = cal.date(byAdding: .day, value: -6, to: cal.startOfDay(for: Date()))!
         return workMinutes(since: start, until: end)
+    }
+
+    /// Fraction of the last `days` calendar days that had any work sessions.
+    func consistencyScore(days: Int) -> Double {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        var count = 0
+        for i in 0..<days {
+            let date = calendar.date(byAdding: .day, value: -i, to: today)!
+            if hasSessions(on: date) { count += 1 }
+        }
+        return Double(count) / Double(days)
+    }
+
+    /// Most minutes logged in any rolling 7-day window.
+    var bestWeekMinutes: Double {
+        let calendar = Calendar.current
+        var dailyTotals: [Date: Double] = [:]
+        for session in sessions where session.type == .work {
+            let day = calendar.startOfDay(for: session.startTime)
+            dailyTotals[day, default: 0] += session.durationMinutes
+        }
+        guard !dailyTotals.isEmpty else { return 0 }
+        var best = 0.0
+        for startDay in dailyTotals.keys {
+            var weekTotal = 0.0
+            for offset in 0..<7 {
+                let day = calendar.date(byAdding: .day, value: offset, to: startDay)!
+                weekTotal += dailyTotals[day] ?? 0
+            }
+            best = max(best, weekTotal)
+        }
+        return best
     }
 
     /// Average minutes/session over the last `n` work sessions.

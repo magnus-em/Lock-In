@@ -7,7 +7,7 @@ class ScratchStore: ObservableObject {
 
     init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let appDir = appSupport.appendingPathComponent("LockIn")
+        let appDir = appSupport.appendingPathComponent("Focus")
         try? FileManager.default.createDirectory(at: appDir, withIntermediateDirectories: true)
         fileURL = appDir.appendingPathComponent("scratch.json")
         load()

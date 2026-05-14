@@ -7,25 +7,40 @@ struct SettingsView: View {
     @State private var showResetConfirm = false
     @State private var newSourceText = ""
 
+    // Manual session logging
+    @State private var manualMinutes: Int = 60
+    @State private var manualDate: Date = Date()
+    @State private var manualLabel: String = ""
+    @State private var manualLogged = false
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
 
                 SectionLabel("INTERVALS")
                 IntervalRow(label: "Focus", value: $settings.workMinutes, range: 5...90, step: 5, unit: "min")
-                IntervalRow(label: "Short Break", value: $settings.shortBreakMinutes, range: 1...30, step: 1, unit: "min")
-                IntervalRow(label: "Long Break", value: $settings.longBreakMinutes, range: 5...60, step: 5, unit: "min")
-                IntRow(label: "Long Break After", value: $settings.sessionsBeforeLongBreak, range: 2...10, suffix: "sessions")
+                IntervalRow(label: "Break", value: $settings.shortBreakMinutes, range: 1...60, step: 1, unit: "min")
 
                 Divider()
 
                 SectionLabel("DAILY GOAL")
-                IntRow(label: "Target Sessions", value: $settings.dailyGoal, range: 0...20, suffix: "", zeroLabel: "Off")
+                IntRow(label: "Daily Target", value: $settings.dailyGoal, range: 0...12, suffix: "h", zeroLabel: "Off")
+
+                Divider()
+
+                SectionLabel("COMMITMENT")
+                ToggleRow(label: "Daily commitment + voice oath", isOn: $settings.commitmentEnabled)
+                if settings.commitmentEnabled {
+                    Text("You'll be prompted each morning to write your commitment for the day and optionally record a voice oath.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 Divider()
 
                 SectionLabel("BEHAVIOR")
-                ToggleRow(label: "Auto-start breaks", isOn: $settings.autoStartBreaks)
+                ToggleRow(label: "Auto-break after session", isOn: $settings.autoBreakEnabled)
                 ToggleRow(label: "Auto-start focus", isOn: $settings.autoStartWork)
                 ToggleRow(label: "Sound effects", isOn: $settings.soundEnabled)
                 IntRow(label: "Auto-end pause after", value: $settings.pauseGraceMinutes, range: 2...60, suffix: "min")
@@ -167,6 +182,102 @@ struct SettingsView: View {
 
                 Divider()
 
+                SectionLabel("LOG MANUAL SESSION")
+
+                VStack(spacing: 10) {
+                    HStack {
+                        Text("Duration")
+                            .font(.system(size: 12, weight: .medium))
+                        Spacer()
+                        Text("\(manualMinutes) min")
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 56, alignment: .trailing)
+                        Stepper("", value: $manualMinutes, in: 1...480, step: 5)
+                            .labelsHidden()
+                            .controlSize(.small)
+                    }
+
+                    HStack {
+                        Text("Date")
+                            .font(.system(size: 12, weight: .medium))
+                        Spacer()
+                        DatePicker("", selection: $manualDate, in: ...Date(), displayedComponents: .date)
+                            .labelsHidden()
+                            .controlSize(.small)
+                    }
+
+                    if !settings.tags.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Label (optional)")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 5) {
+                                    let noneSelected = manualLabel.isEmpty
+                                    Button("None") { manualLabel = "" }
+                                        .font(.system(size: 10, weight: .medium))
+                                        .padding(.horizontal, 9)
+                                        .padding(.vertical, 5)
+                                        .background(noneSelected ? Color.secondary.opacity(0.18) : Color.secondary.opacity(0.07))
+                                        .foregroundStyle(noneSelected ? .primary : .secondary)
+                                        .cornerRadius(6)
+                                        .buttonStyle(.plain)
+                                    ForEach(settings.tags, id: \.self) { tag in
+                                        let sel = manualLabel == tag
+                                        Button(tag) { manualLabel = sel ? "" : tag }
+                                            .font(.system(size: 10, weight: .medium))
+                                            .padding(.horizontal, 9)
+                                            .padding(.vertical, 5)
+                                            .background(sel ? Color(red: 0.96, green: 0.36, blue: 0.36).opacity(0.15) : Color.secondary.opacity(0.07))
+                                            .foregroundStyle(sel ? Color(red: 0.96, green: 0.36, blue: 0.36) : Color.secondary)
+                                            .cornerRadius(6)
+                                            .buttonStyle(.plain)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Button {
+                        let startTime = Calendar.current.startOfDay(for: manualDate)
+                        let session = WorkSession(
+                            startTime: startTime,
+                            durationMinutes: Double(manualMinutes),
+                            type: .work,
+                            label: manualLabel.isEmpty ? nil : manualLabel
+                        )
+                        store.addSession(session)
+                        manualLogged = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { manualLogged = false }
+                    } label: {
+                        HStack(spacing: 6) {
+                            if manualLogged {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 11, weight: .bold))
+                                Text("Logged!")
+                                    .font(.system(size: 12, weight: .semibold))
+                            } else {
+                                Text("Log \(manualMinutes) min session")
+                                    .font(.system(size: 12, weight: .semibold))
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(manualLogged ? Color.green.opacity(0.15) : Color(red: 0.96, green: 0.36, blue: 0.36).opacity(0.12))
+                        .foregroundStyle(manualLogged ? Color.green : Color(red: 0.96, green: 0.36, blue: 0.36))
+                        .cornerRadius(8)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(manualLogged ? Color.green.opacity(0.3) : Color(red: 0.96, green: 0.36, blue: 0.36).opacity(0.2), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .animation(.easeInOut(duration: 0.2), value: manualLogged)
+                }
+
+                Divider()
+
                 if showResetConfirm {
                     VStack(spacing: 8) {
                         Text("Delete all session history?")
@@ -222,10 +333,8 @@ struct SettingsView: View {
             .padding(.vertical, 14)
             .padding(.horizontal, 20)
         }
-        .onChange(of: settings.workMinutes)              { _, _ in timer.applySettings() }
-        .onChange(of: settings.shortBreakMinutes)        { _, _ in timer.applySettings() }
-        .onChange(of: settings.longBreakMinutes)         { _, _ in timer.applySettings() }
-        .onChange(of: settings.sessionsBeforeLongBreak)  { _, _ in timer.applySettings() }
+        .onChange(of: settings.workMinutes)       { _, _ in timer.applySettings() }
+        .onChange(of: settings.shortBreakMinutes) { _, _ in timer.applySettings() }
     }
 
     private func addSource() {

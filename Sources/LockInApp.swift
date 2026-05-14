@@ -1,16 +1,17 @@
 import SwiftUI
 
-// Held at file scope so the hotkey survives for the app's lifetime,
-// regardless of SwiftUI's struct lifecycle.
 private var _pauseHotKey: GlobalHotKey?
 
 @main
-struct LockInApp: App {
+struct FocusApp: App {
     @StateObject private var timerManager: TimerManager
     @StateObject private var sessionStore: SessionStore
     @StateObject private var settings: AppSettings
     @StateObject private var problemStore: ProblemStore
     @StateObject private var scratchStore: ScratchStore
+    @StateObject private var commitmentStore: CommitmentStore
+    @StateObject private var dayStore: DayStore
+    @StateObject private var dashboardController: DashboardWindowController
 
     init() {
         let store = SessionStore()
@@ -21,16 +22,17 @@ struct LockInApp: App {
         timer.settings = appSettings
         timer.applySettings()
 
-        _sessionStore = StateObject(wrappedValue: store)
-        _settings = StateObject(wrappedValue: appSettings)
-        _timerManager = StateObject(wrappedValue: timer)
-        _problemStore = StateObject(wrappedValue: ProblemStore())
-        _scratchStore = StateObject(wrappedValue: ScratchStore())
+        _sessionStore        = StateObject(wrappedValue: store)
+        _settings            = StateObject(wrappedValue: appSettings)
+        _timerManager        = StateObject(wrappedValue: timer)
+        _problemStore        = StateObject(wrappedValue: ProblemStore())
+        _scratchStore        = StateObject(wrappedValue: ScratchStore())
+        _commitmentStore     = StateObject(wrappedValue: CommitmentStore())
+        _dayStore            = StateObject(wrappedValue: DayStore())
+        _dashboardController = StateObject(wrappedValue: DashboardWindowController())
 
-        // Clean up any stale /etc/hosts entries from a previous crash
         SiteBlocker.cleanupIfNeeded()
 
-        // Global hotkey: ⌃⌥Space toggles pause/resume.
         _pauseHotKey = GlobalHotKey(
             keyCode: GlobalHotKey.spaceKey,
             modifiers: GlobalHotKey.controlModifier | GlobalHotKey.optionModifier
@@ -38,15 +40,12 @@ struct LockInApp: App {
             timer?.toggleRunPause()
         }
 
-        // Ensure cleanup on app quit
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
             object: nil,
             queue: .main
         ) { _ in
-            if SiteBlocker.hasStaleEntries() {
-                SiteBlocker.unblockAll()
-            }
+            if SiteBlocker.hasStaleEntries() { SiteBlocker.unblockAll() }
         }
     }
 
@@ -57,13 +56,23 @@ struct LockInApp: App {
                 sessionStore: sessionStore,
                 settings: settings,
                 problemStore: problemStore,
-                scratchStore: scratchStore
+                scratchStore: scratchStore,
+                commitmentStore: commitmentStore,
+                dayStore: dayStore,
+                openDashboard: { [self] in
+                    dashboardController.open(
+                        sessionStore: sessionStore,
+                        problemStore: problemStore,
+                        settings: settings,
+                        dayStore: dayStore
+                    )
+                }
             )
         } label: {
             if timerManager.isActive {
                 Text(timerManager.menuBarTimeText)
             } else {
-                Image(systemName: "lock.fill")
+                Image(systemName: "scope")
             }
         }
         .menuBarExtraStyle(.window)
@@ -76,45 +85,83 @@ struct PopoverContent: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var problemStore: ProblemStore
     @ObservedObject var scratchStore: ScratchStore
+    @ObservedObject var commitmentStore: CommitmentStore
+    @ObservedObject var dayStore: DayStore
+    let openDashboard: () -> Void
+
     @State private var selectedTab = 0
+    @State private var showCommitment = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: $selectedTab) {
-                Image(systemName: "timer").tag(0)
-                Image(systemName: "chart.bar.fill").tag(1)
-                Image(systemName: "checklist").tag(2)
-                Image(systemName: "brain.head.profile").tag(3)
-                Image(systemName: "gearshape.fill").tag(4)
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16)
-            .padding(.top, 10)
-            .padding(.bottom, 2)
-
-            Group {
-                switch selectedTab {
-                case 0: TimerView(timer: timerManager, store: sessionStore, settings: settings)
-                case 1: StatsView(store: sessionStore, settings: settings)
-                case 2: ProblemsView(store: problemStore, settings: settings)
-                case 3: ScratchpadView(store: scratchStore)
-                default: SettingsView(settings: settings, timer: timerManager, store: sessionStore)
+        ZStack {
+            VStack(spacing: 0) {
+                Picker("", selection: $selectedTab) {
+                    Image(systemName: "timer").tag(0)
+                    Image(systemName: "chart.bar.fill").tag(1)
+                    Image(systemName: "checklist").tag(2)
+                    Image(systemName: "brain.head.profile").tag(3)
+                    Image(systemName: "gearshape.fill").tag(4)
                 }
-            }
-            .frame(height: 430)
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+                .padding(.bottom, 2)
 
-            Divider()
+                Group {
+                    switch selectedTab {
+                    case 0: TimerView(
+                        timer: timerManager, store: sessionStore, settings: settings,
+                        dayStore: dayStore, showCommitment: $showCommitment
+                    )
+                    case 1: StatsView(store: sessionStore, settings: settings)
+                    case 2: ProblemsView(store: problemStore, settings: settings)
+                    case 3: ScratchpadView(store: scratchStore)
+                    default: SettingsView(settings: settings, timer: timerManager, store: sessionStore)
+                    }
+                }
+                .frame(height: 430)
 
-            Button("Quit Focus") {
-                NSApplication.shared.terminate(nil)
+                Divider()
+
+                HStack {
+                    Button {
+                        openDashboard()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "rectangle.expand.diagonal")
+                                .font(.system(size: 10))
+                            Text("Dashboard")
+                                .font(.system(size: 11))
+                        }
+                        .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+
+                    Button("Quit Focus") {
+                        NSApplication.shared.terminate(nil)
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
             }
-            .buttonStyle(.plain)
-            .font(.system(size: 11))
-            .foregroundStyle(.secondary)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity)
+
+            if showCommitment {
+                CommitmentView(settings: settings, oathStore: commitmentStore, isShowing: $showCommitment)
+                    .transition(.opacity.animation(.easeInOut(duration: 0.2)))
+                    .zIndex(10)
+            }
         }
         .frame(width: 300)
         .background(Color(NSColor.windowBackgroundColor))
+        .onAppear {
+            if dayStore.isDayStarted && settings.needsCommitmentToday {
+                showCommitment = true
+            }
+        }
     }
 }

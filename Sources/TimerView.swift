@@ -4,56 +4,58 @@ struct TimerView: View {
     @ObservedObject var timer: TimerManager
     @ObservedObject var store: SessionStore
     @ObservedObject var settings: AppSettings
+    @ObservedObject var dayStore: DayStore
+    @Binding var showCommitment: Bool
+
+    @State private var showBreakPicker = false
 
     private var phaseColor: Color {
         switch timer.currentPhase {
         case .work:       return Color(red: 0.96, green: 0.36, blue: 0.36)
-        case .shortBreak: return Color(red: 0.30, green: 0.78, blue: 0.74)
-        case .longBreak:  return Color(red: 0.27, green: 0.62, blue: 0.83)
+        case .shortBreak, .longBreak: return Color(red: 0.27, green: 0.62, blue: 0.83)
         }
     }
 
     private var goalProgress: Double {
         guard settings.dailyGoal > 0 else { return 0 }
-        return min(1.0, Double(store.todaySessionCount) / Double(settings.dailyGoal))
+        return min(1.0, store.todayWorkMinutes / 60.0 / Double(settings.dailyGoal))
     }
 
     var body: some View {
-        VStack(spacing: 12) {
-            // Phase label
-            Text(timer.currentPhase.rawValue.uppercased())
+        VStack(spacing: 10) {
+            dayStatusRow
+
+            Text(timer.currentPhase.displayName.uppercased())
                 .font(.system(size: 11, weight: .bold, design: .rounded))
                 .tracking(2)
                 .foregroundStyle(phaseColor)
 
-            // Category selector
-            if settings.tags.isEmpty {
-                Text("Add categories in the Stats tab")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity)
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(settings.tags, id: \.self) { tag in
-                            let selected = timer.currentLabel == tag
-                            Button(tag) {
-                                timer.currentLabel = selected ? "" : tag
+            if !timer.isOnBreak {
+                if settings.tags.isEmpty {
+                    Text("Add categories in the Stats tab")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(settings.tags, id: \.self) { tag in
+                                let selected = timer.currentLabel == tag
+                                Button(tag) { timer.currentLabel = selected ? "" : tag }
+                                    .font(.system(size: 11, weight: .medium))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(selected ? phaseColor.opacity(0.18) : Color.secondary.opacity(0.08))
+                                    .foregroundStyle(selected ? phaseColor : Color.secondary)
+                                    .clipShape(Capsule())
+                                    .buttonStyle(.plain)
                             }
-                            .font(.system(size: 11, weight: .medium))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(selected ? phaseColor.opacity(0.18) : Color.secondary.opacity(0.08))
-                            .foregroundStyle(selected ? phaseColor : Color.secondary)
-                            .clipShape(Capsule())
-                            .buttonStyle(.plain)
                         }
+                        .padding(.horizontal, 1)
                     }
-                    .padding(.horizontal, 1)
                 }
             }
 
-            // Blocking badge
             if timer.isBlockingActive {
                 HStack(spacing: 4) {
                     Image(systemName: "shield.fill").font(.system(size: 9))
@@ -62,8 +64,7 @@ struct TimerView: View {
                 .foregroundStyle(phaseColor.opacity(0.7))
             }
 
-            // Quick presets — only when idle on a work phase
-            if !timer.isActive && timer.currentPhase == .work {
+            if !timer.isActive && !timer.isOnBreak {
                 HStack(spacing: 6) {
                     ForEach([15, 25, 45, 60], id: \.self) { mins in
                         let selected = Int(timer.totalTime / 60) == mins
@@ -79,9 +80,7 @@ struct TimerView: View {
                 }
             }
 
-            // Circular timer ring
             ZStack {
-                // Outer ring — daily goal progress (hidden when goal is off)
                 if settings.dailyGoal > 0 {
                     Circle()
                         .stroke(Color.secondary.opacity(0.08), lineWidth: 3)
@@ -93,7 +92,6 @@ struct TimerView: View {
                         .rotationEffect(.degrees(-90))
                 }
 
-                // Inner ring — session progress
                 Circle()
                     .stroke(phaseColor.opacity(0.12), lineWidth: 8)
                     .frame(width: 136, height: 136)
@@ -104,32 +102,20 @@ struct TimerView: View {
                     .rotationEffect(.degrees(-90))
                     .animation(.linear(duration: 0.5), value: timer.progress)
 
-                // Center display
                 VStack(spacing: 4) {
                     Text(timer.timeString)
                         .font(.system(size: 34, weight: .medium, design: .monospaced))
                         .contentTransition(.numericText())
                         .animation(.linear(duration: 0.3), value: timer.timeString)
 
-                    // Cycle position dots
-                    if timer.currentPhase == .work {
-                        let done = timer.workSessionsCompleted % settings.sessionsBeforeLongBreak
-                        HStack(spacing: 5) {
-                            ForEach(0..<settings.sessionsBeforeLongBreak, id: \.self) { i in
-                                Circle()
-                                    .fill(
-                                        i < done  ? phaseColor :
-                                        i == done ? phaseColor.opacity(0.5) :
-                                                    phaseColor.opacity(0.15)
-                                    )
-                                    .frame(width: 6, height: 6)
-                            }
-                        }
+                    if !timer.isOnBreak && store.todaySessionCount > 0 {
+                        Text("Session \(store.todaySessionCount + (timer.isActive ? 1 : 0))")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(phaseColor.opacity(0.5))
                     }
                 }
             }
 
-            // Controls
             HStack(spacing: 12) {
                 Button {
                     timer.reset()
@@ -144,7 +130,6 @@ struct TimerView: View {
                 .help(timer.isActive ? "End session (saves progress)" : "Reset timer")
 
                 Button {
-                    guard !timer.isAwaitingFlowDecision else { return }
                     timer.isRunning ? timer.pause() : timer.start()
                 } label: {
                     Image(systemName: timer.isRunning ? "pause.fill" : "play.fill")
@@ -166,8 +151,7 @@ struct TimerView: View {
                 .buttonStyle(.plain)
             }
 
-            // Duration adjustment — active work session only, not during flow decision
-            if timer.isActive && timer.currentPhase == .work && !timer.isAwaitingFlowDecision {
+            if timer.isActive && !timer.isOnBreak {
                 HStack(spacing: 6) {
                     ForEach([-10, -5, 5, 10], id: \.self) { delta in
                         Button(delta > 0 ? "+\(delta)m" : "\(delta)m") {
@@ -184,36 +168,68 @@ struct TimerView: View {
                 }
             }
 
+            if !timer.isActive && !timer.isOnBreak {
+                Button {
+                    showBreakPicker = true
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "cup.and.saucer")
+                            .font(.system(size: 10))
+                        Text("Take a Break")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 5)
+                    .background(Color.secondary.opacity(0.07))
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+
             Divider().padding(.horizontal, 8)
 
-            // Today's stats
             HStack {
                 VStack(spacing: 2) {
-                    Text("\(store.todaySessionCount)")
+                    Text(formatMinutes(store.todayWorkMinutes))
                         .font(.system(size: 18, weight: .bold, design: .rounded))
                         .contentTransition(.numericText())
-                    Text("Sessions")
+                    Text("Focus")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity)
 
                 VStack(spacing: 2) {
-                    Text(formatMinutes(store.todayWorkMinutes))
+                    Text(formatMinutes(store.todayBreakMinutes))
                         .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundStyle(.secondary)
                         .contentTransition(.numericText())
-                    Text("Focus Time")
+                    Text("Break")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity)
 
                 if settings.dailyGoal > 0 {
+                    let hoursToday = store.todayWorkMinutes / 60.0
+                    let goalMet = hoursToday >= Double(settings.dailyGoal)
                     VStack(spacing: 2) {
-                        Text("\(store.todaySessionCount)/\(settings.dailyGoal)")
+                        Text(String(format: "%.1f/\(settings.dailyGoal)h", hoursToday))
                             .font(.system(size: 18, weight: .bold, design: .rounded))
-                            .foregroundStyle(store.todaySessionCount >= settings.dailyGoal ? .green : .primary)
+                            .foregroundStyle(goalMet ? Color.green : Color.primary)
+                            .contentTransition(.numericText())
                         Text("Goal")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(goalMet ? Color.green : Color.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                } else {
+                    VStack(spacing: 2) {
+                        Text("\(store.currentStreak)d")
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                            .foregroundStyle(store.currentStreak > 0 ? .orange : .secondary)
+                        Text("Streak")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(.secondary)
                     }
@@ -221,12 +237,145 @@ struct TimerView: View {
                 }
             }
         }
-        .padding(.vertical, 14)
+        .padding(.vertical, 10)
         .padding(.horizontal, 20)
+        .sheet(isPresented: $showBreakPicker) {
+            BreakPickerSheet { minutes in
+                timer.startManualBreak(minutes: minutes)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var dayStatusRow: some View {
+        if dayStore.isDayEnded {
+            HStack {
+                Image(systemName: "moon.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+                Text("Day ended")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                Spacer()
+            }
+        } else if dayStore.isDayStarted {
+            HStack {
+                if let start = dayStore.todayRecord?.dayStart {
+                    Text("Since \(clockStr(start))")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+                Button("End Day") { dayStore.endDay() }
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .buttonStyle(.plain)
+            }
+        } else {
+            HStack {
+                Spacer()
+                Button {
+                    dayStore.startDay()
+                    if settings.commitmentEnabled && settings.needsCommitmentToday {
+                        showCommitment = true
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "sunrise.fill")
+                            .font(.system(size: 10))
+                        Text("Start Day")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundStyle(phaseColor)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 5)
+                    .background(phaseColor.opacity(0.1))
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                Spacer()
+            }
+        }
     }
 
     private func formatMinutes(_ minutes: Double) -> String {
         let h = Int(minutes) / 60, m = Int(minutes) % 60
         return h > 0 ? "\(h)h \(m)m" : "\(m)m"
+    }
+
+    private func clockStr(_ d: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "h:mma"; return f.string(from: d)
+    }
+}
+
+private struct BreakPickerSheet: View {
+    let onSelect: (Double) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var showCustom = false
+    @State private var customMinutes: Double = 30
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Take a Break")
+                    .font(.system(size: 14, weight: .semibold))
+                Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+            }
+
+            VStack(spacing: 8) {
+                ForEach([(30.0, "30 minutes"), (60.0, "1 hour"), (120.0, "2 hours")], id: \.0) { mins, label in
+                    Button {
+                        onSelect(mins)
+                        dismiss()
+                    } label: {
+                        Text(label)
+                            .font(.system(size: 13, weight: .medium))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(Color.secondary.opacity(0.08))
+                            .cornerRadius(8)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if showCustom {
+                    VStack(spacing: 8) {
+                        HStack {
+                            Text("\(Int(customMinutes)) min")
+                                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                                .frame(width: 70)
+                            Stepper("", value: $customMinutes, in: 5...480, step: 5)
+                                .labelsHidden()
+                        }
+                        Button {
+                            onSelect(customMinutes)
+                            dismiss()
+                        } label: {
+                            Text("Start \(Int(customMinutes)) min break")
+                                .font(.system(size: 13, weight: .medium))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .background(Color(red: 0.27, green: 0.62, blue: 0.83).opacity(0.12))
+                                .foregroundStyle(Color(red: 0.27, green: 0.62, blue: 0.83))
+                                .cornerRadius(8)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                } else {
+                    Button("Custom…") { showCustom = true }
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(20)
+        .frame(width: 240)
     }
 }

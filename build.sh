@@ -40,7 +40,7 @@ cat > "$APP_DIR/Info.plist" << 'EOF'
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Focus uses your microphone to record a voice oath that plays back when you try to end a committed session early.</string>
+    <string>Focus uses your microphone to record a daily voice oath for your commitment.</string>
 </dict>
 </plist>
 EOF

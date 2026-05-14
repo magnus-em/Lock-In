@@ -41,7 +41,7 @@ struct ProblemEntry: Codable, Identifiable {
     let title: String
     let domain: ProblemDomain
     let categories: [String]
-    let difficulty: ProblemDifficulty
+    var difficulty: ProblemDifficulty
     var needsReview: Bool
     var confidence: Confidence
     var source: String
@@ -126,6 +126,8 @@ struct WorkSession: Codable, Identifiable {
         case work
         case shortBreak
         case longBreak
+
+        var isBreak: Bool { self != .work }
     }
 }
 
@@ -134,6 +136,20 @@ struct DailySummary: Identifiable {
     let date: Date
     let totalWorkMinutes: Double
     let sessionCount: Int
+}
+
+// MARK: - Day record
+
+struct DayRecord: Codable, Identifiable {
+    let id: UUID
+    let calendarDay: Date
+    var dayStart: Date?
+    var dayEnd: Date?
+
+    init() {
+        self.id = UUID()
+        self.calendarDay = Calendar.current.startOfDay(for: Date())
+    }
 }
 
 // MARK: - Scratchpad
