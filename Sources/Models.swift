@@ -17,7 +17,6 @@ enum Confidence: String, Codable, CaseIterable {
 enum ProblemDomain: String, Codable, CaseIterable {
     case quant = "Quant"
     case swe   = "SWE"
-    case ai    = "AI/ML"
 
     var categories: [String] {
         switch self {
@@ -31,12 +30,6 @@ enum ProblemDomain: String, Codable, CaseIterable {
             "Binary Search", "Linked List", "Trees", "Tries", "Heap",
             "Backtracking", "Graphs", "Dynamic Programming", "Greedy",
             "Intervals", "Bit Manipulation", "Math & Geometry"
-        ]
-        case .ai: return [
-            "Machine Learning", "Deep Learning", "Transformers & LLMs",
-            "RAG & Embeddings", "Reinforcement Learning", "Computer Vision",
-            "NLP", "Probability & Stats", "System Design (AI)",
-            "Coding for ML", "MLOps", "AI Safety"
         ]
         }
     }

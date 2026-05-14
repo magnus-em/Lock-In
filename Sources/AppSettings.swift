@@ -93,5 +93,11 @@ class AppSettings: ObservableObject {
         problemSources = d.stringArray(forKey: "problemSources") ?? ["QuantGuide", "LeetCode"]
         let epoch = d.double(forKey: "interviewDate")
         interviewDate = epoch > 0 ? Date(timeIntervalSince1970: epoch) : nil
+
+        // Ensure AI/ML appears as a focus tag
+        if !tags.contains("AI/ML") {
+            tags.append("AI/ML")
+            d.set(tags, forKey: "tags")
+        }
     }
 }

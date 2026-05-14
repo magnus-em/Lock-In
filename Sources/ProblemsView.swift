@@ -7,14 +7,12 @@ extension ProblemDomain {
         switch self {
         case .quant: return Color(red: 0.27, green: 0.62, blue: 0.83)
         case .swe:   return Color(red: 0.25, green: 0.72, blue: 0.53)
-        case .ai:    return Color(red: 0.56, green: 0.35, blue: 0.85)
         }
     }
     var icon: String {
         switch self {
         case .quant: return "function"
         case .swe:   return "chevron.left.forwardslash.chevron.right"
-        case .ai:    return "sparkles"
         }
     }
 }
