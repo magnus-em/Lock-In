@@ -132,4 +132,52 @@ class ProblemStore: ObservableObject {
             (confidence: c, count: problems.filter { $0.confidence == c }.count)
         }
     }
+
+    // MARK: - Streak
+
+    var problemStreak: Int {
+        let cal = Calendar.current
+        var day = cal.startOfDay(for: Date())
+        // If today is empty, start counting from yesterday
+        if !problems.contains(where: { cal.startOfDay(for: $0.date) == day }) {
+            day = cal.date(byAdding: .day, value: -1, to: day)!
+        }
+        var streak = 0
+        while problems.contains(where: { cal.startOfDay(for: $0.date) == day }) {
+            streak += 1
+            day = cal.date(byAdding: .day, value: -1, to: day)!
+        }
+        return streak
+    }
+
+    // MARK: - Weak areas
+
+    /// Categories ranked by lowest average confidence (min 2 attempts).
+    func weakestCategories(limit: Int = 3) -> [(category: String, avgScore: Double, count: Int)] {
+        var data: [String: (score: Double, count: Int)] = [:]
+        for p in problems {
+            let score: Double
+            switch p.confidence {
+            case .solid:     score = 2.0
+            case .shaky:     score = 1.0
+            case .struggled: score = 0.0
+            }
+            for cat in p.categories {
+                let cur = data[cat] ?? (0, 0)
+                data[cat] = (cur.score + score, cur.count + 1)
+            }
+        }
+        return data
+            .filter { $0.value.count >= 2 }
+            .map { (category: $0.key, avgScore: $0.value.score / Double($0.value.count), count: $0.value.count) }
+            .sorted { $0.avgScore < $1.avgScore }
+            .prefix(limit)
+            .map { $0 }
+    }
+
+    // MARK: - Spaced repetition
+
+    var dueForReview: [ProblemEntry] {
+        problems.filter { $0.isDueForReview }.sorted { $0.date < $1.date }
+    }
 }

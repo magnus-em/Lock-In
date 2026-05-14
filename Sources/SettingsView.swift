@@ -80,6 +80,48 @@ struct SettingsView: View {
 
                 Divider()
 
+                SectionLabel("INTERVIEW")
+
+                if let date = settings.interviewDate {
+                    HStack {
+                        Text("Target date")
+                            .font(.system(size: 12, weight: .medium))
+                        Spacer()
+                        DatePicker(
+                            "",
+                            selection: Binding(get: { date }, set: { settings.interviewDate = $0 }),
+                            in: Date()...,
+                            displayedComponents: .date
+                        )
+                        .labelsHidden()
+                        .controlSize(.small)
+
+                        Button {
+                            settings.interviewDate = nil
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                } else {
+                    Button {
+                        // Default to 4 months from now
+                        settings.interviewDate = Calendar.current.date(byAdding: .month, value: 4, to: Date())
+                    } label: {
+                        HStack {
+                            Image(systemName: "calendar.badge.plus")
+                            Text("Set interview date")
+                        }
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Divider()
+
                 SectionLabel("PROBLEM GOALS")
                 IntRow(label: "Quant target", value: $settings.quantGoal, range: 0...2000, suffix: "problems", zeroLabel: "Off")
                 IntRow(label: "SWE target", value: $settings.sweGoal, range: 0...2000, suffix: "problems", zeroLabel: "Off")

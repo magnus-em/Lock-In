@@ -7,12 +7,14 @@ extension ProblemDomain {
         switch self {
         case .quant: return Color(red: 0.27, green: 0.62, blue: 0.83)
         case .swe:   return Color(red: 0.25, green: 0.72, blue: 0.53)
+        case .ai:    return Color(red: 0.56, green: 0.35, blue: 0.85)
         }
     }
     var icon: String {
         switch self {
         case .quant: return "function"
         case .swe:   return "chevron.left.forwardslash.chevron.right"
+        case .ai:    return "sparkles"
         }
     }
 }
@@ -51,9 +53,13 @@ struct ProblemsView: View {
         ZStack {
             ScrollView {
                 VStack(spacing: 12) {
+                    if settings.interviewDate != nil {
+                        countdownCard
+                    }
+
                     goalSection
 
-                    if !store.needsReviewItems.isEmpty {
+                    if !store.needsReviewItems.isEmpty || !store.dueForReview.isEmpty {
                         reviewCard
                     }
 
@@ -90,6 +96,68 @@ struct ProblemsView: View {
         }
     }
 
+    // MARK: - Interview countdown
+
+    private var countdownCard: some View {
+        let date = settings.interviewDate!
+        let days = max(0, Calendar.current.dateComponents([.day],
+            from: Calendar.current.startOfDay(for: Date()),
+            to: Calendar.current.startOfDay(for: date)).day ?? 0)
+        let totalGoal = settings.quantGoal + settings.sweGoal
+        let pace: Double = (totalGoal > 0 && days > 0)
+            ? Double(max(0, totalGoal - store.totalCount)) / Double(days)
+            : 0
+
+        let urgent = days <= 30
+        let accent = urgent ? Color.orange : Color(red: 0.27, green: 0.62, blue: 0.83)
+
+        return HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("INTERVIEW IN")
+                    .font(.system(size: 9, weight: .bold))
+                    .tracking(1)
+                    .foregroundStyle(.tertiary)
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text("\(days)")
+                        .font(.system(size: 26, weight: .bold, design: .rounded))
+                        .foregroundStyle(accent)
+                    Text("days")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            if pace > 0 {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(String(format: "%.1f / day", pace))
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                    Text("problems to goal")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                }
+            } else if totalGoal == 0 {
+                Text("Set a goal in Settings")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            } else {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.green)
+                    Text("Goal reached!")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(12)
+        .background(accent.opacity(0.06))
+        .cornerRadius(10)
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(accent.opacity(0.2), lineWidth: 1))
+    }
+
     // MARK: - Goal bars
 
     private var goalSection: some View {
@@ -107,7 +175,11 @@ struct ProblemsView: View {
     // MARK: - Review queue
 
     private var reviewCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let aiItems = store.needsReviewItems
+        let dueItems = store.dueForReview.filter { !$0.needsReview } // avoid double-counting
+        let total = aiItems.count + dueItems.count
+
+        return VStack(alignment: .leading, spacing: 0) {
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) { reviewExpanded.toggle() }
             } label: {
@@ -115,17 +187,22 @@ struct ProblemsView: View {
                     Image(systemName: "arrow.clockwise.circle.fill")
                         .font(.system(size: 11))
                         .foregroundStyle(.orange)
-                    Text("NEEDS REVIEW")
+                    Text("REVIEW QUEUE")
                         .font(.system(size: 10, weight: .bold))
                         .tracking(1)
                         .foregroundStyle(.orange)
-                    Text("\(store.needsReviewItems.count)")
+                    Text("\(total)")
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
                         .background(Color.orange)
                         .clipShape(Capsule())
+                    if !dueItems.isEmpty {
+                        Text("\(dueItems.count) spaced")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.orange.opacity(0.7))
+                    }
                     Spacer()
                     Image(systemName: reviewExpanded ? "chevron.up" : "chevron.down")
                         .font(.system(size: 9, weight: .semibold))
@@ -139,13 +216,11 @@ struct ProblemsView: View {
             if reviewExpanded {
                 Divider().padding(.horizontal, 10)
                 VStack(spacing: 0) {
-                    ForEach(store.needsReviewItems.prefix(6)) { item in
-                        ReviewRow(item: item, store: store) {
-                            selectedProblem = item
-                        }
+                    ForEach((aiItems + dueItems).prefix(6)) { item in
+                        ReviewRow(item: item, store: store) { selectedProblem = item }
                     }
-                    if store.needsReviewItems.count > 6 {
-                        Text("+ \(store.needsReviewItems.count - 6) more")
+                    if total > 6 {
+                        Text("+ \(total - 6) more")
                             .font(.system(size: 10))
                             .foregroundStyle(.tertiary)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -164,10 +239,24 @@ struct ProblemsView: View {
 
     private var progressCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("LAST 7 DAYS")
-                .font(.system(size: 10, weight: .bold))
-                .tracking(1.2)
-                .foregroundStyle(.secondary)
+            HStack {
+                Text("LAST 7 DAYS")
+                    .font(.system(size: 10, weight: .bold))
+                    .tracking(1.2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                let streak = store.problemStreak
+                if streak > 0 {
+                    HStack(spacing: 3) {
+                        Image(systemName: "flame.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.orange)
+                        Text("\(streak)d streak")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.orange)
+                    }
+                }
+            }
 
             let days = store.dailyCounts(days: 7)
             let maxCount = max(1, days.map { $0.count }.max() ?? 1)
@@ -243,9 +332,40 @@ struct ProblemsView: View {
                 }
                 .frame(maxWidth: .infinity)
             }
+            // Weak areas
+            let weak = store.weakestCategories(limit: 3)
+            if !weak.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("FOCUS ON")
+                        .font(.system(size: 9, weight: .bold))
+                        .tracking(1)
+                        .foregroundStyle(.tertiary)
+                    ForEach(weak, id: \.category) { item in
+                        HStack(spacing: 7) {
+                            Circle()
+                                .fill(scoreColor(item.avgScore))
+                                .frame(width: 6, height: 6)
+                            Text(item.category)
+                                .font(.system(size: 11, weight: .medium))
+                                .lineLimit(1)
+                            Spacer()
+                            Text("\(item.count) logged")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.quaternary)
+                        }
+                    }
+                }
+            }
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.secondary.opacity(0.04)))
+    }
+
+    private func scoreColor(_ score: Double) -> Color {
+        if score < 0.7 { return Color(red: 0.96, green: 0.36, blue: 0.36) }
+        if score < 1.4 { return Color(red: 0.98, green: 0.70, blue: 0.18) }
+        return Color(red: 0.22, green: 0.72, blue: 0.45)
     }
 
     // MARK: - Log button
@@ -496,6 +616,7 @@ struct LogProblemOverlay: View {
     @Binding var isShowing: Bool
 
     @State private var title: String = ""
+    @State private var urlText: String = ""
     @State private var selectedSource: String = ""
     @State private var selectedDomain: ProblemDomain = .quant
     @State private var selectedCategories: Set<String> = []
@@ -739,6 +860,26 @@ struct LogProblemOverlay: View {
                             }
                         }
 
+                        // URL — optional
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack(spacing: 4) {
+                                Text("LINK")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .tracking(1)
+                                    .foregroundStyle(.secondary)
+                                Text("optional")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.quaternary)
+                            }
+                            TextField("https://leetcode.com/problems/…", text: $urlText)
+                                .font(.system(size: 11))
+                                .textFieldStyle(.plain)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(Color.secondary.opacity(0.07))
+                                .cornerRadius(7)
+                        }
+
                         // AI help
                         Button { usedAIHelp.toggle() } label: {
                             HStack(spacing: 10) {
@@ -796,6 +937,8 @@ struct LogProblemOverlay: View {
             source: selectedSource,
             needsReview: usedAIHelp,
             confidence: selectedConfidence,
+            notes: "",
+            url: urlText.trimmingCharacters(in: .whitespaces),
             solveMinutes: selectedSolveMinutes
         ))
         isShowing = false

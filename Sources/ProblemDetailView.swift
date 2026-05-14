@@ -9,6 +9,7 @@ struct ProblemDetailView: View {
     @State private var confidence: Confidence
     @State private var needsReview: Bool
     @State private var notes: String
+    @State private var url: String
     @State private var solveMinutes: Int?
     @State private var showDeleteConfirm = false
 
@@ -23,6 +24,7 @@ struct ProblemDetailView: View {
         self._confidence   = State(initialValue: problem.confidence)
         self._needsReview  = State(initialValue: problem.needsReview)
         self._notes        = State(initialValue: problem.notes)
+        self._url          = State(initialValue: problem.url)
         self._solveMinutes = State(initialValue: problem.solveMinutes)
     }
 
@@ -197,6 +199,33 @@ struct ProblemDetailView: View {
 
                         Divider()
 
+                        // URL
+                        VStack(alignment: .leading, spacing: 7) {
+                            DetailLabel("LINK")
+                            HStack(spacing: 8) {
+                                TextField("https://", text: $url)
+                                    .font(.system(size: 11))
+                                    .textFieldStyle(.plain)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 7)
+                                    .background(Color.secondary.opacity(0.07))
+                                    .cornerRadius(7)
+                                if !url.isEmpty, let parsed = URL(string: url),
+                                   url.hasPrefix("http://") || url.hasPrefix("https://") {
+                                    Button {
+                                        NSWorkspace.shared.open(parsed)
+                                    } label: {
+                                        Image(systemName: "arrow.up.right.square.fill")
+                                            .font(.system(size: 16))
+                                            .foregroundStyle(Color(red: 0.27, green: 0.62, blue: 0.83))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+
+                        Divider()
+
                         // Notes
                         VStack(alignment: .leading, spacing: 7) {
                             DetailLabel("NOTES")
@@ -231,6 +260,7 @@ struct ProblemDetailView: View {
         updated.confidence   = confidence
         updated.needsReview  = needsReview
         updated.notes        = notes
+        updated.url          = url
         updated.solveMinutes = solveMinutes
         store.update(updated)
         isShowing = false

@@ -16,7 +16,8 @@ enum Confidence: String, Codable, CaseIterable {
 
 enum ProblemDomain: String, Codable, CaseIterable {
     case quant = "Quant"
-    case swe = "SWE"
+    case swe   = "SWE"
+    case ai    = "AI/ML"
 
     var categories: [String] {
         switch self {
@@ -30,6 +31,12 @@ enum ProblemDomain: String, Codable, CaseIterable {
             "Binary Search", "Linked List", "Trees", "Tries", "Heap",
             "Backtracking", "Graphs", "Dynamic Programming", "Greedy",
             "Intervals", "Bit Manipulation", "Math & Geometry"
+        ]
+        case .ai: return [
+            "Machine Learning", "Deep Learning", "Transformers & LLMs",
+            "RAG & Embeddings", "Reinforcement Learning", "Computer Vision",
+            "NLP", "Probability & Stats", "System Design (AI)",
+            "Coding for ML", "MLOps", "AI Safety"
         ]
         }
     }
@@ -46,17 +53,18 @@ struct ProblemEntry: Codable, Identifiable {
     var confidence: Confidence
     var source: String
     var notes: String
+    var url: String
     var solveMinutes: Int?
 
     enum CodingKeys: String, CodingKey {
         case id, date, title, domain, categories, difficulty
-        case needsReview, confidence, source, notes, solveMinutes
+        case needsReview, confidence, source, notes, url, solveMinutes
     }
 
     init(title: String, domain: ProblemDomain, categories: [String],
          difficulty: ProblemDifficulty, source: String = "",
          needsReview: Bool = false, confidence: Confidence = .solid,
-         notes: String = "", solveMinutes: Int? = nil) {
+         notes: String = "", url: String = "", solveMinutes: Int? = nil) {
         self.id = UUID()
         self.date = Date()
         self.title = title
@@ -67,6 +75,7 @@ struct ProblemEntry: Codable, Identifiable {
         self.needsReview = needsReview
         self.confidence = confidence
         self.notes = notes
+        self.url = url
         self.solveMinutes = solveMinutes
     }
 
@@ -82,7 +91,24 @@ struct ProblemEntry: Codable, Identifiable {
         confidence   = try c.decodeIfPresent(Confidence.self,  forKey: .confidence)   ?? .solid
         source       = try c.decodeIfPresent(String.self,      forKey: .source)       ?? ""
         notes        = try c.decodeIfPresent(String.self,      forKey: .notes)        ?? ""
+        url          = try c.decodeIfPresent(String.self,      forKey: .url)          ?? ""
         solveMinutes = try c.decodeIfPresent(Int.self,         forKey: .solveMinutes)
+    }
+
+    /// Days until this problem is due for review based on confidence.
+    /// Returns nil if the problem doesn't need a scheduled review.
+    var reviewDueDate: Date? {
+        guard confidence != .solid || needsReview else { return nil }
+        let interval: TimeInterval
+        if needsReview       { interval = 1 * 86400 }
+        else if confidence == .struggled { interval = 1 * 86400 }
+        else                 { interval = 3 * 86400 } // shaky
+        return date.addingTimeInterval(interval)
+    }
+
+    var isDueForReview: Bool {
+        guard let due = reviewDueDate else { return false }
+        return due <= Date()
     }
 }
 

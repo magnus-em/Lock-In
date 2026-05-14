@@ -51,6 +51,11 @@ class AppSettings: ObservableObject {
     @Published var problemSources: [String] {
         didSet { UserDefaults.standard.set(problemSources, forKey: "problemSources") }
     }
+    @Published var interviewDate: Date? {
+        didSet {
+            UserDefaults.standard.set(interviewDate?.timeIntervalSince1970 ?? 0, forKey: "interviewDate")
+        }
+    }
 
     init() {
         let d = UserDefaults.standard
@@ -86,5 +91,7 @@ class AppSettings: ObservableObject {
         quantGoal = d.integer(forKey: "quantGoal")
         sweGoal = d.integer(forKey: "sweGoal")
         problemSources = d.stringArray(forKey: "problemSources") ?? ["QuantGuide", "LeetCode"]
+        let epoch = d.double(forKey: "interviewDate")
+        interviewDate = epoch > 0 ? Date(timeIntervalSince1970: epoch) : nil
     }
 }
