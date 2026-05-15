@@ -138,8 +138,13 @@ struct SettingsView: View {
                 Divider()
 
                 SectionLabel("PROBLEM GOALS")
-                IntRow(label: "Quant target", value: $settings.quantGoal, range: 0...2000, suffix: "problems", zeroLabel: "Off")
-                IntRow(label: "SWE target", value: $settings.sweGoal, range: 0...2000, suffix: "problems", zeroLabel: "Off")
+                HStack {
+                    Spacer()
+                    Text("Daily").font(.system(size: 10, weight: .medium)).foregroundStyle(.tertiary).frame(width: 72, alignment: .trailing)
+                    Text("Weekly").font(.system(size: 10, weight: .medium)).foregroundStyle(.tertiary).frame(width: 72, alignment: .trailing)
+                }
+                ProblemGoalRow(label: "Quant", daily: $settings.quantGoal, weekly: $settings.quantWeeklyGoal)
+                ProblemGoalRow(label: "SWE", daily: $settings.sweGoal, weekly: $settings.sweWeeklyGoal)
 
                 Divider()
 
@@ -185,18 +190,7 @@ struct SettingsView: View {
                 SectionLabel("LOG MANUAL SESSION")
 
                 VStack(spacing: 10) {
-                    HStack {
-                        Text("Duration")
-                            .font(.system(size: 12, weight: .medium))
-                        Spacer()
-                        Text("\(manualMinutes) min")
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 56, alignment: .trailing)
-                        Stepper("", value: $manualMinutes, in: 1...480, step: 5)
-                            .labelsHidden()
-                            .controlSize(.small)
-                    }
+                    IntRow(label: "Duration", value: $manualMinutes, range: 1...480, suffix: "min")
 
                     HStack {
                         Text("Date")
@@ -366,18 +360,38 @@ private struct IntervalRow: View {
     let step: Double
     let unit: String
 
+    @State private var text: String = ""
+    @FocusState private var isFocused: Bool
+
     var body: some View {
         HStack {
             Text(label).font(.system(size: 12, weight: .medium))
             Spacer()
-            Text("\(Int(value)) \(unit)")
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .frame(width: 56, alignment: .trailing)
-            Stepper("", value: $value, in: range, step: step)
-                .labelsHidden()
-                .controlSize(.small)
+            HStack(spacing: 4) {
+                TextField("", text: $text)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 36)
+                    .textFieldStyle(.plain)
+                    .focused($isFocused)
+                    .onSubmit { commit() }
+                    .onChange(of: isFocused) { _, focused in if !focused { commit() } }
+                Text(unit).font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Color.secondary.opacity(0.08))
+            .cornerRadius(6)
         }
+        .onAppear { text = "\(Int(value))" }
+        .onChange(of: value) { _, _ in text = "\(Int(value))" }
+    }
+
+    private func commit() {
+        if let v = Double(text.trimmingCharacters(in: .whitespaces)) {
+            value = min(max(v, range.lowerBound), range.upperBound)
+        }
+        text = "\(Int(value))"
     }
 }
 
@@ -388,23 +402,88 @@ private struct IntRow: View {
     var suffix: String = ""
     var zeroLabel: String? = nil
 
-    private var display: String {
-        if value == 0, let z = zeroLabel { return z }
-        return suffix.isEmpty ? "\(value)" : "\(value) \(suffix)"
-    }
+    @State private var text: String = ""
+    @FocusState private var isFocused: Bool
 
     var body: some View {
         HStack {
             Text(label).font(.system(size: 12, weight: .medium))
             Spacer()
-            Text(display)
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                .foregroundStyle(value == 0 && zeroLabel != nil ? .tertiary : .secondary)
-                .frame(minWidth: 56, alignment: .trailing)
-            Stepper("", value: $value, in: range)
-                .labelsHidden()
-                .controlSize(.small)
+            HStack(spacing: 4) {
+                TextField("", text: $text)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: suffix.isEmpty ? 44 : 40)
+                    .textFieldStyle(.plain)
+                    .focused($isFocused)
+                    .onSubmit { commit() }
+                    .onChange(of: isFocused) { _, focused in if !focused { commit() } }
+                if !suffix.isEmpty {
+                    Text(suffix).font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Color.secondary.opacity(0.08))
+            .cornerRadius(6)
         }
+        .onAppear { text = "\(value)" }
+        .onChange(of: value) { _, _ in text = "\(value)" }
+    }
+
+    private func commit() {
+        if let v = Int(text.trimmingCharacters(in: .whitespaces)) {
+            value = min(max(v, range.lowerBound), range.upperBound)
+        }
+        text = "\(value)"
+    }
+}
+
+private struct ProblemGoalRow: View {
+    let label: String
+    @Binding var daily: Int
+    @Binding var weekly: Int
+
+    var body: some View {
+        HStack {
+            Text(label).font(.system(size: 12, weight: .medium))
+            Spacer()
+            InlineIntField(value: $daily).frame(width: 72)
+            InlineIntField(value: $weekly).frame(width: 72)
+        }
+    }
+}
+
+private struct InlineIntField: View {
+    @Binding var value: Int
+    @State private var text: String = ""
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        HStack(spacing: 3) {
+            TextField("0", text: $text)
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .multilineTextAlignment(.trailing)
+                .frame(width: 36)
+                .textFieldStyle(.plain)
+                .focused($isFocused)
+                .onSubmit { commit() }
+                .onChange(of: isFocused) { _, focused in if !focused { commit() } }
+            Text("probs").font(.system(size: 9)).foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(Color.secondary.opacity(0.08))
+        .cornerRadius(6)
+        .onAppear { text = "\(value)" }
+        .onChange(of: value) { _, _ in text = "\(value)" }
+    }
+
+    private func commit() {
+        if let v = Int(text.trimmingCharacters(in: .whitespaces)) {
+            value = max(0, v)
+        }
+        text = "\(value)"
     }
 }
 

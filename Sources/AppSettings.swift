@@ -68,8 +68,14 @@ class AppSettings: ObservableObject {
     @Published var quantGoal: Int {
         didSet { UserDefaults.standard.set(quantGoal, forKey: "quantGoal") }
     }
+    @Published var quantWeeklyGoal: Int {
+        didSet { UserDefaults.standard.set(quantWeeklyGoal, forKey: "quantWeeklyGoal") }
+    }
     @Published var sweGoal: Int {
         didSet { UserDefaults.standard.set(sweGoal, forKey: "sweGoal") }
+    }
+    @Published var sweWeeklyGoal: Int {
+        didSet { UserDefaults.standard.set(sweWeeklyGoal, forKey: "sweWeeklyGoal") }
     }
     @Published var problemSources: [String] {
         didSet { UserDefaults.standard.set(problemSources, forKey: "problemSources") }
@@ -97,7 +103,9 @@ class AppSettings: ObservableObject {
             "autoBreakEnabled": true,
             "commitmentEnabled": true,
             "quantGoal": 0,
+            "quantWeeklyGoal": 0,
             "sweGoal": 0,
+            "sweWeeklyGoal": 0,
             "problemSources": ["QuantGuide", "LeetCode"],
         ])
         workMinutes = d.double(forKey: "workMinutes")
@@ -118,7 +126,9 @@ class AppSettings: ObservableObject {
         lastCommitmentDateEpoch = d.double(forKey: "lastCommitmentDateEpoch")
         todayCommitment = d.string(forKey: "todayCommitment") ?? ""
         quantGoal = d.integer(forKey: "quantGoal")
+        quantWeeklyGoal = d.integer(forKey: "quantWeeklyGoal")
         sweGoal = d.integer(forKey: "sweGoal")
+        sweWeeklyGoal = d.integer(forKey: "sweWeeklyGoal")
         problemSources = d.stringArray(forKey: "problemSources") ?? ["QuantGuide", "LeetCode"]
         let epoch = d.double(forKey: "interviewDate")
         interviewDate = epoch > 0 ? Date(timeIntervalSince1970: epoch) : nil
