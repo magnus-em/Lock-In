@@ -441,28 +441,55 @@ class TimerManager: ObservableObject {
     }
 
     func saveOnQuit() {
-        // Ensure the latest timer state is in UserDefaults before the process exits.
-        // recoverPartialSession() will pick this up on the next launch.
+        // Flush checkpoint to disk immediately before the process exits.
         saveCheckpoint()
+        UserDefaults.standard.synchronize()
     }
 
     func recoverPartialSession(into store: SessionStore) {
         guard let data = UserDefaults.standard.dictionary(forKey: Self.checkpointKey) else { return }
         clearCheckpoint()
-        guard let startEpoch = data["sessionStartTime"] as? Double,
-              let elapsed0 = data["elapsedBeforePause"] as? Double else { return }
+
+        guard let startEpoch  = data["sessionStartTime"]    as? Double,
+              let elapsed0    = data["elapsedBeforePause"]  as? Double,
+              let total       = data["totalTime"]            as? Double else { return }
+
+        // Compute how much time had elapsed, including any dead time while the app was quit.
         var elapsed = elapsed0
+        let wasRunning = data["lastResumeTime"] != nil
         if let resumeEpoch = data["lastResumeTime"] as? Double {
             elapsed += Date().timeIntervalSince(Date(timeIntervalSince1970: resumeEpoch))
         }
-        if let total = data["totalTime"] as? Double { elapsed = min(elapsed, total) }
-        guard elapsed >= 60 else { return }
-        let label = data["currentLabel"] as? String
-        store.addSession(WorkSession(
-            startTime: Date(timeIntervalSince1970: startEpoch),
-            durationMinutes: elapsed / 60.0, type: .work,
-            label: label?.isEmpty == false ? label : nil
-        ))
+
+        let label = (data["currentLabel"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let remaining = total - elapsed
+
+        // If the session would have finished while the app was dead, save it as completed.
+        if elapsed >= total {
+            if total >= 60 {
+                store.addSession(WorkSession(
+                    startTime: Date(timeIntervalSince1970: startEpoch),
+                    durationMinutes: total / 60.0, type: .work, label: label
+                ))
+            }
+            return
+        }
+
+        // Session still has time left — restore the live timer state.
+        currentPhase       = .work
+        totalTime          = total
+        timeRemaining      = remaining
+        elapsedBeforePause = elapsed
+        sessionStartTime   = Date(timeIntervalSince1970: startEpoch)
+        currentLabel       = label ?? ""
+
+        if wasRunning {
+            // Auto-resume after a short delay so the UI and settings are fully initialised.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                self?.start()
+            }
+        }
+        // If it was paused before the kill, leave it in the paused state.
     }
 
     // MARK: - Notifications
