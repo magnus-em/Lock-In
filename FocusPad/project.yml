@@ -47,6 +47,7 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_ENTITLEMENTS: FocusPad/FocusPad.entitlements
         CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: MUR9TJXP6S
         SWIFT_VERSION: "5.9"
         ENABLE_PREVIEWS: YES
         GENERATE_INFOPLIST_FILE: NO
