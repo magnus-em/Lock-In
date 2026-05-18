@@ -143,7 +143,12 @@ public final class FocusTimerEngine: ObservableObject {
     }
 
     private func cancelCompletionNotification() {
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [Self.notifIdentifier])
+        let center = UNUserNotificationCenter.current()
+        // Cancel future + clear any already-delivered (so if user comes back
+        // after a stale notification fired, it disappears from the lock
+        // screen / notification center once we realize the state is paused).
+        center.removePendingNotificationRequests(withIdentifiers: [Self.notifIdentifier])
+        center.removeDeliveredNotifications(withIdentifiers: [Self.notifIdentifier])
     }
 
     // MARK: - Computed
@@ -594,7 +599,23 @@ public final class FocusTimerEngine: ObservableObject {
     }
 
     private func didBecomeActive() {
-        // Reconcile elapsed against wall-clock — fixes drift while suspended.
+        // 1) Reconcile with shared state — another device may have paused
+        //    or stopped while we were backgrounded. This must happen FIRST
+        //    so we cancel any stale notifications + sync UI before drift fix.
+        ignoreRemoteUntil = .distantPast
+        if let shared = stateSync.currentState(),
+           shared.deviceID != stateSync.deviceID {
+            applyRemoteState(shared)
+        }
+
+        // 2) If the timer is no longer running for any reason (just got
+        //    paused above, or local pause we forgot to clean up), wipe
+        //    any pending OR already-delivered completion notification.
+        if !isRunning {
+            cancelCompletionNotification()
+        }
+
+        // 3) Reconcile elapsed against wall-clock — fixes drift while suspended.
         if isRunning, let resume = lastResumeTime {
             let elapsed = elapsedBeforePause + Date().timeIntervalSince(resume)
             elapsedSeconds = elapsed

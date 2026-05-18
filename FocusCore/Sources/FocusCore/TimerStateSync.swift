@@ -26,6 +26,8 @@ public final class TimerStateSync: ObservableObject, @unchecked Sendable {
 
     public var onRemoteChange: ((StoredTimerState) -> Void)?
 
+    private var remoteChangeObserver: NSObjectProtocol?
+
     public init(container: ModelContainer) {
         self.container = container
         self.deviceID = Self.persistedDeviceID()
@@ -36,7 +38,25 @@ public final class TimerStateSync: ObservableObject, @unchecked Sendable {
             lastSeenUpdatedAt = existing.updatedAt
         }
 
+        // React the *moment* CloudKit's import lands rather than waiting for
+        // the 2s poll. This is what makes background → foreground transitions
+        // feel instant: pause-from-other-device shows up right after iOS
+        // delivers the silent push that woke us.
+        remoteChangeObserver = NotificationCenter.default.addObserver(
+            forName: .NSPersistentStoreRemoteChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.checkForRemote()
+        }
+
         start()
+    }
+
+    deinit {
+        if let o = remoteChangeObserver {
+            NotificationCenter.default.removeObserver(o)
+        }
     }
 
     public func start() {
