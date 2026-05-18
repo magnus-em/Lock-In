@@ -12,6 +12,8 @@
 	<array>
 		<string>CloudKit</string>
 	</array>
+	<key>com.apple.developer.ubiquity-kvstore-identifier</key>
+	<string>MUR9TJXP6S.com.magnus.focus</string>
 	<key>com.apple.security.app-sandbox</key>
 	<false/>
 </dict>

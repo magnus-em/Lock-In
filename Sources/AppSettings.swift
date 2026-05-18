@@ -1,30 +1,74 @@
 import Foundation
+import FocusCore
 
 class AppSettings: ObservableObject {
+    // MARK: - Synced settings (UserDefaults + iCloud KVS)
+
     @Published var workMinutes: Double {
-        didSet { UserDefaults.standard.set(workMinutes, forKey: "workMinutes") }
+        didSet { sd.set(workMinutes, forKey: "workMinutes") }
     }
     @Published var shortBreakMinutes: Double {
-        didSet { UserDefaults.standard.set(shortBreakMinutes, forKey: "shortBreakMinutes") }
+        didSet { sd.set(shortBreakMinutes, forKey: "shortBreakMinutes") }
     }
     @Published var longBreakMinutes: Double {
-        didSet { UserDefaults.standard.set(longBreakMinutes, forKey: "longBreakMinutes") }
+        didSet { sd.set(longBreakMinutes, forKey: "longBreakMinutes") }
     }
     @Published var sessionsBeforeLongBreak: Int {
-        didSet { UserDefaults.standard.set(sessionsBeforeLongBreak, forKey: "sessionsBeforeLongBreak") }
+        didSet { sd.set(sessionsBeforeLongBreak, forKey: "sessionsBeforeLongBreak") }
     }
     @Published var dailyGoal: Int {
-        didSet { UserDefaults.standard.set(dailyGoal, forKey: "dailyGoalHours") }
+        didSet { sd.set(dailyGoal, forKey: "dailyGoalHours") }
     }
     @Published var autoStartBreaks: Bool {
-        didSet { UserDefaults.standard.set(autoStartBreaks, forKey: "autoStartBreaks") }
+        didSet { sd.set(autoStartBreaks, forKey: "autoStartBreaks") }
     }
     @Published var autoStartWork: Bool {
-        didSet { UserDefaults.standard.set(autoStartWork, forKey: "autoStartWork") }
+        didSet { sd.set(autoStartWork, forKey: "autoStartWork") }
     }
     @Published var soundEnabled: Bool {
-        didSet { UserDefaults.standard.set(soundEnabled, forKey: "soundEnabled") }
+        didSet { sd.set(soundEnabled, forKey: "soundEnabled") }
     }
+    @Published var tags: [String] {
+        didSet { sd.set(tags, forKey: "tags") }
+    }
+    @Published var pauseGraceMinutes: Int {
+        didSet { sd.set(pauseGraceMinutes, forKey: "pauseGraceMinutes") }
+    }
+    @Published var autoBreakEnabled: Bool {
+        didSet { sd.set(autoBreakEnabled, forKey: "autoBreakEnabled") }
+    }
+    @Published var commitmentEnabled: Bool {
+        didSet { sd.set(commitmentEnabled, forKey: "commitmentEnabled") }
+    }
+    @Published var lastCommitmentDateEpoch: Double {
+        didSet { sd.set(lastCommitmentDateEpoch, forKey: "lastCommitmentDateEpoch") }
+    }
+    @Published var todayCommitment: String {
+        didSet { sd.set(todayCommitment, forKey: "todayCommitment") }
+    }
+    @Published var quantGoal: Int {
+        didSet { sd.set(quantGoal, forKey: "quantGoal") }
+    }
+    @Published var quantWeeklyGoal: Int {
+        didSet { sd.set(quantWeeklyGoal, forKey: "quantWeeklyGoal") }
+    }
+    @Published var sweGoal: Int {
+        didSet { sd.set(sweGoal, forKey: "sweGoal") }
+    }
+    @Published var sweWeeklyGoal: Int {
+        didSet { sd.set(sweWeeklyGoal, forKey: "sweWeeklyGoal") }
+    }
+    @Published var problemSources: [String] {
+        didSet { sd.set(problemSources, forKey: "problemSources") }
+    }
+    @Published var interviewDate: Date? {
+        didSet {
+            sd.set(interviewDate?.timeIntervalSince1970 ?? 0, forKey: "interviewDate")
+        }
+    }
+
+    // MARK: - Device-local (Mac-specific)
+
     @Published var siteBlockingEnabled: Bool {
         didSet { UserDefaults.standard.set(siteBlockingEnabled, forKey: "siteBlockingEnabled") }
     }
@@ -34,28 +78,11 @@ class AppSettings: ObservableObject {
     @Published var blockedSites: [String] {
         didSet { UserDefaults.standard.set(blockedSites, forKey: "blockedSites") }
     }
-    @Published var tags: [String] {
-        didSet { UserDefaults.standard.set(tags, forKey: "tags") }
-    }
-    /// Minutes a paused work session can sit before auto-saving + ending.
-    @Published var pauseGraceMinutes: Int {
-        didSet { UserDefaults.standard.set(pauseGraceMinutes, forKey: "pauseGraceMinutes") }
-    }
-    @Published var autoBreakEnabled: Bool {
-        didSet { UserDefaults.standard.set(autoBreakEnabled, forKey: "autoBreakEnabled") }
-    }
-    @Published var commitmentEnabled: Bool {
-        didSet { UserDefaults.standard.set(commitmentEnabled, forKey: "commitmentEnabled") }
-    }
-    @Published var lastCommitmentDateEpoch: Double {
-        didSet { UserDefaults.standard.set(lastCommitmentDateEpoch, forKey: "lastCommitmentDateEpoch") }
-    }
-    @Published var todayCommitment: String {
-        didSet { UserDefaults.standard.set(todayCommitment, forKey: "todayCommitment") }
-    }
     @Published var hasCompletedOnboarding: Bool {
         didSet { UserDefaults.standard.set(hasCompletedOnboarding, forKey: "hasCompletedOnboarding") }
     }
+
+    private let sd = SyncedDefaults.shared
 
     var needsCommitmentToday: Bool {
         guard commitmentEnabled else { return false }
@@ -68,31 +95,9 @@ class AppSettings: ObservableObject {
         lastCommitmentDateEpoch = Date().timeIntervalSince1970
     }
 
-    @Published var quantGoal: Int {
-        didSet { UserDefaults.standard.set(quantGoal, forKey: "quantGoal") }
-    }
-    @Published var quantWeeklyGoal: Int {
-        didSet { UserDefaults.standard.set(quantWeeklyGoal, forKey: "quantWeeklyGoal") }
-    }
-    @Published var sweGoal: Int {
-        didSet { UserDefaults.standard.set(sweGoal, forKey: "sweGoal") }
-    }
-    @Published var sweWeeklyGoal: Int {
-        didSet { UserDefaults.standard.set(sweWeeklyGoal, forKey: "sweWeeklyGoal") }
-    }
-    @Published var problemSources: [String] {
-        didSet { UserDefaults.standard.set(problemSources, forKey: "problemSources") }
-    }
-    @Published var interviewDate: Date? {
-        didSet {
-            UserDefaults.standard.set(interviewDate?.timeIntervalSince1970 ?? 0, forKey: "interviewDate")
-        }
-    }
-
     init() {
         let d = UserDefaults.standard
 
-        // Existing-user detection: if any prior signal exists, skip onboarding.
         if !d.bool(forKey: "hasCompletedOnboarding") {
             let priorState = (d.stringArray(forKey: "tags")?.isEmpty == false)
                 || d.double(forKey: "lastCommitmentDateEpoch") > 0
@@ -147,10 +152,42 @@ class AppSettings: ObservableObject {
         interviewDate = epoch > 0 ? Date(timeIntervalSince1970: epoch) : nil
         hasCompletedOnboarding = d.bool(forKey: "hasCompletedOnboarding")
 
-        // One-time normalization for legacy "AI/ML" tag.
         if tags.contains("AI/ML") {
             tags = tags.map { $0 == "AI/ML" ? "AI" : $0 }
-            d.set(tags, forKey: "tags")
+            sd.set(tags, forKey: "tags")
         }
+
+        // When another device updates synced settings, refresh from defaults.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(reloadFromDefaults),
+            name: SyncedDefaults.didImportRemoteChanges,
+            object: nil
+        )
+    }
+
+    @objc private func reloadFromDefaults() {
+        let d = UserDefaults.standard
+        workMinutes = d.double(forKey: "workMinutes")
+        shortBreakMinutes = d.double(forKey: "shortBreakMinutes")
+        longBreakMinutes = d.double(forKey: "longBreakMinutes")
+        sessionsBeforeLongBreak = d.integer(forKey: "sessionsBeforeLongBreak")
+        dailyGoal = d.integer(forKey: "dailyGoalHours")
+        autoStartBreaks = d.bool(forKey: "autoStartBreaks")
+        autoStartWork = d.bool(forKey: "autoStartWork")
+        soundEnabled = d.bool(forKey: "soundEnabled")
+        tags = d.stringArray(forKey: "tags") ?? tags
+        pauseGraceMinutes = d.integer(forKey: "pauseGraceMinutes")
+        autoBreakEnabled = d.bool(forKey: "autoBreakEnabled")
+        commitmentEnabled = d.bool(forKey: "commitmentEnabled")
+        lastCommitmentDateEpoch = d.double(forKey: "lastCommitmentDateEpoch")
+        todayCommitment = d.string(forKey: "todayCommitment") ?? todayCommitment
+        quantGoal = d.integer(forKey: "quantGoal")
+        quantWeeklyGoal = d.integer(forKey: "quantWeeklyGoal")
+        sweGoal = d.integer(forKey: "sweGoal")
+        sweWeeklyGoal = d.integer(forKey: "sweWeeklyGoal")
+        problemSources = d.stringArray(forKey: "problemSources") ?? problemSources
+        let epoch = d.double(forKey: "interviewDate")
+        interviewDate = epoch > 0 ? Date(timeIntervalSince1970: epoch) : nil
     }
 }
