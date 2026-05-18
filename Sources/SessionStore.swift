@@ -23,6 +23,26 @@ class SessionStore: ObservableObject {
     }
 
     func addSession(_ session: WorkSession) {
+        // De-dup: when a timer finishes on this device AND on a peer mirror
+        // (e.g. iPad-Mac live sync), both insertSession paths fire. Guard
+        // by looking up any existing session within ±3s of this startTime
+        // with matching type + label. Reason: SwiftData/CloudKit doesn't
+        // support unique constraints, so this is the only race-safe place.
+        let start = session.startTime
+        let lower = start.addingTimeInterval(-3)
+        let upper = start.addingTimeInterval(3)
+        let typeRaw = session.type.rawValue
+        let descriptor = FetchDescriptor<StoredWorkSession>(
+            predicate: #Predicate { existing in
+                existing.startTime >= lower &&
+                existing.startTime <= upper &&
+                existing.typeRaw == typeRaw
+            }
+        )
+        if let dupes = try? context.fetch(descriptor),
+           dupes.contains(where: { $0.label == session.label }) {
+            return
+        }
         context.insert(StoredWorkSession(value: session))
         try? context.save()
         refresh()

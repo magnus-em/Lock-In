@@ -519,6 +519,26 @@ public final class FocusTimerEngine: ObservableObject {
 
     private func insertSession(_ s: WorkSession) {
         let ctx = context
+        // Dedup: when the same timer completes on Mac + iPad simultaneously,
+        // each device's engine calls insertSession independently. Look up
+        // any existing session within ±3s of this startTime with the same
+        // type + label and skip the insert if it's already there. CloudKit
+        // doesn't support unique constraints so this is the safest spot.
+        let start = s.startTime
+        let lower = start.addingTimeInterval(-3)
+        let upper = start.addingTimeInterval(3)
+        let typeRaw = s.type.rawValue
+        let descriptor = FetchDescriptor<StoredWorkSession>(
+            predicate: #Predicate { existing in
+                existing.startTime >= lower &&
+                existing.startTime <= upper &&
+                existing.typeRaw == typeRaw
+            }
+        )
+        if let dupes = try? ctx.fetch(descriptor),
+           dupes.contains(where: { $0.label == s.label }) {
+            return
+        }
         ctx.insert(StoredWorkSession(value: s))
         try? ctx.save()
         if s.type == .work {
