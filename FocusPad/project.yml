@@ -41,6 +41,10 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
+        NSLocalNetworkUsageDescription: "Focus uses your local network to sync the timer instantly between your iPad and Mac on the same Wi-Fi."
+        NSBonjourServices:
+          - _focus-timer._tcp
+          - _focus-timer._udp
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.magnus.focus.iPad

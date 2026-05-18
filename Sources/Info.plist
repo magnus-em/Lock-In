@@ -26,5 +26,12 @@
 	<string>14.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_focus-timer._tcp</string>
+		<string>_focus-timer._udp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Focus uses your local network to sync the timer instantly between your Mac and iPad on the same Wi-Fi.</string>
 </dict>
 </plist>

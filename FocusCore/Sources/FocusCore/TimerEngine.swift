@@ -72,6 +72,7 @@ public final class FocusTimerEngine: ObservableObject {
     private var context: ModelContext { container.mainContext }
     private var ticker: AnyCancellable?
     public let stateSync: TimerStateSync
+    public let localBroadcast: LocalTimerBroadcast
     private var sessionStartTime: Date?
     private var elapsedBeforePause: TimeInterval = 0
     private var lastResumeTime: Date?
@@ -85,13 +86,18 @@ public final class FocusTimerEngine: ObservableObject {
         self.totalTime = settings.workMinutes * 60
         self.timeRemaining = settings.workMinutes * 60
         self.stateSync = TimerStateSync(container: container)
+        self.localBroadcast = LocalTimerBroadcast(deviceID: stateSync.deviceID)
         recoverPartialSession()
         recomputeTodayCount()
         requestNotificationPermission()
 
-        // Listen for remote changes from other devices.
+        // Listen for remote changes from other devices via CloudKit.
         stateSync.onRemoteChange = { [weak self] state in
             self?.applyRemoteState(state)
+        }
+        // Listen for instant local broadcasts (same wifi).
+        localBroadcast.onMessage = { [weak self] msg in
+            self?.applyRemoteMessage(msg)
         }
         // On launch, if a remote timer is already running, adopt it.
         if let s = stateSync.currentState(),
@@ -198,7 +204,24 @@ public final class FocusTimerEngine: ObservableObject {
         let total = totalTime
         let isRun = isRunning
         let remaining = timeRemaining
+        let endTime = isRun ? Date().addingTimeInterval(remaining) : nil
 
+        // 1) Instant: broadcast to same-wifi peers.
+        let msg = LocalTimerBroadcast.Message(
+            deviceID: stateSync.deviceID,
+            phase: sharedPhase.rawValue,
+            isRunning: isRun,
+            totalSeconds: total,
+            label: label,
+            breakKindsRaw: kinds.map(\.rawValue),
+            startTime: start,
+            endTime: endTime,
+            remainingSeconds: remaining,
+            timestamp: Date()
+        )
+        localBroadcast.send(msg)
+
+        // 2) Durable: write to CloudKit-backed SwiftData (catches devices that aren't reachable).
         stateSync.push { state in
             state.phase = sharedPhase
             state.isRunning = isRun
@@ -206,13 +229,71 @@ public final class FocusTimerEngine: ObservableObject {
             state.label = label
             state.breakKindsRaw = kinds.map(\.rawValue)
             state.startTime = start
-            if isRun {
-                state.endTime = Date().addingTimeInterval(remaining)
-                state.remainingSeconds = remaining
-            } else {
-                state.endTime = nil
-                state.remainingSeconds = remaining
-            }
+            state.endTime = endTime
+            state.remainingSeconds = remaining
+        }
+    }
+
+    private func pushIdleEverywhere() {
+        ignoreRemoteUntil = Date().addingTimeInterval(3.0)
+        let msg = LocalTimerBroadcast.Message(
+            deviceID: stateSync.deviceID,
+            phase: "idle",
+            isRunning: false,
+            totalSeconds: 0,
+            label: "",
+            breakKindsRaw: [],
+            startTime: Date?.none,
+            endTime: Date?.none,
+            remainingSeconds: 0,
+            timestamp: Date()
+        )
+        localBroadcast.send(msg)
+        stateSync.pushIdle()
+    }
+
+    /// Apply a state message received via the instant local broadcast.
+    private func applyRemoteMessage(_ msg: LocalTimerBroadcast.Message) {
+        guard Date() > ignoreRemoteUntil else { return }
+        guard let phaseEnum = StoredTimerState.Phase(rawValue: msg.phase) else { return }
+        if phaseEnum == .idle {
+            ticker?.cancel(); ticker = nil
+            isRunning = false
+            elapsedBeforePause = 0
+            lastResumeTime = nil
+            sessionStartTime = nil
+            elapsedSeconds = 0
+            phase = .work
+            totalTime = settings.workMinutes * 60
+            timeRemaining = totalTime
+            currentLabel = ""
+            currentBreakKinds = []
+            cancelCompletionNotification()
+            return
+        }
+        phase = (phaseEnum == .work) ? .work : .breakPhase
+        totalTime = msg.totalSeconds
+        currentLabel = msg.label
+        currentBreakKinds = msg.breakKindsRaw.compactMap { BreakKind(rawValue: $0) }
+        sessionStartTime = msg.startTime
+        if msg.isRunning, let end = msg.endTime {
+            let remaining = max(0, end.timeIntervalSinceNow)
+            timeRemaining = remaining
+            elapsedBeforePause = totalTime - remaining
+            lastResumeTime = Date()
+            isRunning = true
+            ticker?.cancel()
+            ticker = Timer.publish(every: 0.5, on: .main, in: .common)
+                .autoconnect()
+                .sink { [weak self] _ in self?.tick() }
+            scheduleCompletionNotification()
+        } else {
+            timeRemaining = msg.remainingSeconds
+            elapsedBeforePause = totalTime - msg.remainingSeconds
+            lastResumeTime = nil
+            isRunning = false
+            ticker?.cancel(); ticker = nil
+            cancelCompletionNotification()
         }
     }
 
@@ -345,7 +426,7 @@ public final class FocusTimerEngine: ObservableObject {
     private func completePhase() {
         ticker?.cancel(); ticker = nil
         isRunning = false
-        stateSync.pushIdle()
+        pushIdleEverywhere()
 
         if let start = sessionStartTime {
             let type: WorkSession.SessionType = phase == .work ? .work : .shortBreak
@@ -387,7 +468,7 @@ public final class FocusTimerEngine: ObservableObject {
         ticker?.cancel(); ticker = nil
         isRunning = false
         cancelCompletionNotification()
-        stateSync.pushIdle()
+        pushIdleEverywhere()
         let elapsed = currentElapsedSeconds
 
         if let start = sessionStartTime {

@@ -29,6 +29,10 @@ targets:
         CFBundleIconFile: AppIcon
         LSUIElement: true
         LSMinimumSystemVersion: "14.0"
+        NSLocalNetworkUsageDescription: "Focus uses your local network to sync the timer instantly between your Mac and iPad on the same Wi-Fi."
+        NSBonjourServices:
+          - _focus-timer._tcp
+          - _focus-timer._udp
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.magnus.focus

@@ -20,6 +20,13 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_focus-timer._tcp</string>
+		<string>_focus-timer._udp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Focus uses your local network to sync the timer instantly between your iPad and Mac on the same Wi-Fi.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

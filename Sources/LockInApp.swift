@@ -51,7 +51,9 @@ struct FocusApp: App {
         timer.sessionStore = store
         timer.settings = appSettings
         timer.applySettings()
-        timer.stateSync = TimerStateSync(container: focusContainer)
+        let stateSync = TimerStateSync(container: focusContainer)
+        timer.stateSync = stateSync
+        timer.localBroadcast = LocalTimerBroadcast(deviceID: stateSync.deviceID)
 
         _sessionStore        = StateObject(wrappedValue: store)
         _settings            = StateObject(wrappedValue: appSettings)

@@ -51,6 +51,13 @@ class TimerManager: ObservableObject {
             }
         }
     }
+    var localBroadcast: LocalTimerBroadcast? {
+        didSet {
+            localBroadcast?.onMessage = { [weak self] msg in
+                self?.applyRemoteMessage(msg)
+            }
+        }
+    }
     private var ignoreRemoteUntil: Date = .distantPast
 
     private var workDuration: TimeInterval { (settings?.workMinutes ?? 25) * 60 }
@@ -161,6 +168,26 @@ class TimerManager: ObservableObject {
         let total = totalTime
         let isRun = isRunning
         let remaining = timeRemaining
+        let endTime = isRun ? Date().addingTimeInterval(remaining) : nil
+
+        // Instant: local broadcast (same-wifi peers)
+        if let lb = localBroadcast {
+            let msg = LocalTimerBroadcast.Message(
+                deviceID: stateSync.deviceID,
+                phase: sharedPhase.rawValue,
+                isRunning: isRun,
+                totalSeconds: total,
+                label: label,
+                breakKindsRaw: kinds.map(\.rawValue),
+                startTime: start,
+                endTime: endTime,
+                remainingSeconds: remaining,
+                timestamp: Date()
+            )
+            lb.send(msg)
+        }
+
+        // Durable: SwiftData → CloudKit
         stateSync.push { state in
             state.phase = sharedPhase
             state.isRunning = isRun
@@ -168,13 +195,71 @@ class TimerManager: ObservableObject {
             state.label = label
             state.breakKindsRaw = kinds.map(\.rawValue)
             state.startTime = start
-            if isRun {
-                state.endTime = Date().addingTimeInterval(remaining)
-                state.remainingSeconds = remaining
-            } else {
-                state.endTime = nil
-                state.remainingSeconds = remaining
-            }
+            state.endTime = endTime
+            state.remainingSeconds = remaining
+        }
+    }
+
+    private func pushIdleEverywhere() {
+        guard let stateSync else { return }
+        ignoreRemoteUntil = Date().addingTimeInterval(3.0)
+        if let lb = localBroadcast {
+            let msg = LocalTimerBroadcast.Message(
+                deviceID: stateSync.deviceID,
+                phase: "idle",
+                isRunning: false,
+                totalSeconds: 0,
+                label: "",
+                breakKindsRaw: [],
+                startTime: Date?.none,
+                endTime: Date?.none,
+                remainingSeconds: 0,
+                timestamp: Date()
+            )
+            lb.send(msg)
+        }
+        stateSync.pushIdle()
+    }
+
+    private func applyRemoteMessage(_ msg: LocalTimerBroadcast.Message) {
+        guard Date() > ignoreRemoteUntil else { return }
+        guard let phaseEnum = StoredTimerState.Phase(rawValue: msg.phase) else { return }
+        if phaseEnum == .idle {
+            timer?.cancel(); timer = nil
+            isRunning = false
+            elapsedBeforePause = 0
+            lastResumeTime = nil
+            sessionStartTime = nil
+            currentPhase = .work
+            currentLabel = ""
+            currentBreakKinds = []
+            setTimeForCurrentPhase()
+            unblockIfNeeded()
+            return
+        }
+        currentPhase = (phaseEnum == .work) ? .work : .shortBreak
+        totalTime = msg.totalSeconds
+        currentLabel = msg.label
+        currentBreakKinds = msg.breakKindsRaw.compactMap { BreakKind(rawValue: $0) }
+        sessionStartTime = msg.startTime
+        if msg.isRunning, let end = msg.endTime {
+            let remaining = max(0, end.timeIntervalSinceNow)
+            timeRemaining = remaining
+            elapsedBeforePause = totalTime - remaining
+            lastResumeTime = Date()
+            isRunning = true
+            timer?.cancel()
+            tickCount = 0
+            timer = Timer.publish(every: 0.5, on: .main, in: .common)
+                .autoconnect()
+                .sink { [weak self] _ in self?.tick() }
+            updateBlocking()
+        } else {
+            timeRemaining = msg.remainingSeconds
+            elapsedBeforePause = totalTime - msg.remainingSeconds
+            lastResumeTime = nil
+            isRunning = false
+            timer?.cancel(); timer = nil
         }
     }
 
@@ -255,7 +340,7 @@ class TimerManager: ObservableObject {
         currentPhase = .work
         setTimeForCurrentPhase()
         unblockIfNeeded()
-        stateSync?.pushIdle()
+        pushIdleEverywhere()
     }
 
     func skip() {
@@ -287,7 +372,7 @@ class TimerManager: ObservableObject {
         currentPhase = .work
         setTimeForCurrentPhase()
         updateBlocking()
-        stateSync?.pushIdle()
+        pushIdleEverywhere()
     }
 
     func startManualBreak(minutes: Double, kinds: [BreakKind] = []) {
