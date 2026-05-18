@@ -1,11 +1,13 @@
 # Morning handoff — iPad app build-out
 
-Built overnight. Two commits on `main`:
+Built overnight. Four commits on `main` (top → bottom):
 
-- `e5eeef2` — iPad feature parity (timer, dashboard, stats, problems, homework, scratchpad, settings, day-log, sidebar nav)
-- next commit — polish: Awards, Insights, Today's Priorities, haptics, personal-best banner, sync diagnostics
+1. `020adcc` — Local notifications on timer events; quick-add problem button on Timer toolbar
+2. `88ad895` — Search field on Problems + Homework lists; JSON export from Settings
+3. `843e9a6` — Awards screen, Insights screen, Today's Priorities, haptics, personal-best banner, sync diagnostics in Settings
+4. `e5eeef2` — Core feature parity (timer, dashboard, stats, problems, homework, scratchpad, settings, day-log, sidebar nav)
 
-Both commits land on top of the day's earlier `780f72e` merge.
+All four land on top of the day's earlier `780f72e` merge.
 
 ## What's new on the iPad
 
@@ -65,11 +67,18 @@ open FocusPad.xcodeproj
 # In Xcode: select "Magnus's iPad" destination, hit Run.
 ```
 
+## Also added
+
+- **Local notifications**: when you start a focus or break session, a `UNTimeIntervalNotificationTrigger` is scheduled at the expected completion moment. Cancels on pause/stop/skip, reschedules on ±5/±10. So you hear the bell even with the iPad asleep / app backgrounded.
+- **Search**: native `.searchable()` on both Problems and Homework. Title, source, notes, categories.
+- **JSON export**: Settings → Data → "Export Snapshot (JSON)" produces a single timestamped file (`focus-export-yyyy-MM-dd-HHmm.json`) with every session, problem, homework, day record, scratch item. Handed to UIActivityViewController so you can AirDrop, email, or save to Files.
+- **Quick-add problem**: `+circle` toolbar button on the Timer screen opens the full AddProblemSheet without leaving the timer flow.
+
 ## Things I considered and skipped (not blockers)
 
 - **Live Activity / Lock-screen widget**: requires a separate WidgetKit extension target. Useful, but adding a target mid-flight has too many ways to break the build. Worth a separate session.
 - **App Intents / Shortcuts**: "Hey Siri, start a 25-minute focus" — same target-config caveat.
-- **Sound on completion**: the Mac uses `NSSound`; iOS would need AVFoundation. Not done, but the setting toggle is there.
+- **Sound on completion**: the Mac uses `NSSound`; iOS would need AVFoundation. The local notification's `.default` sound covers most of the gap.
 - **Mac → iPad immediate sync without an iCloud-friendly network**: can't be fixed in code.
 
 ## File map (for orientation)
@@ -86,8 +95,9 @@ FocusPad/FocusPad/
   PadTheme.swift              ← design tokens (cards, headers, metric tiles)
   Haptics.swift               ← UIImpactFeedbackGenerator wrappers
   TodayPriorities.swift       ← UserDefaults-backed top-3 tasks
+  DataExport.swift            ← JSON snapshot + ShareSheet wrapper
 
-  TimerScreen.swift           ← timer + day controls + priorities
+  TimerScreen.swift           ← timer + day controls + priorities + quick-add
   DashboardScreen.swift       ← rings + personal best + momentum
   DayLogScreen.swift          ← per-day timeline
   StatsScreen.swift           ← heatmap + consistency + lifetime
