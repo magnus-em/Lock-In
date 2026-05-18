@@ -14,6 +14,7 @@ struct DashboardScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 greetingHeader
+                personalBestBanner
                 ringsCard
                 momentumCards
                 streakCard
@@ -28,6 +29,100 @@ struct DashboardScreen: View {
         .background(Color(.systemGroupedBackground).ignoresSafeArea())
         .navigationTitle("Overview")
         .navigationBarTitleDisplayMode(.large)
+    }
+
+    // MARK: - Personal best detection
+
+    private var personalBest: PersonalBest? {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let workSessions = sessions.filter { $0.type == .work }
+        guard !workSessions.isEmpty else { return nil }
+
+        // Best day in history.
+        let byDay = workSessions.reduce(into: [Date: Double]()) {
+            $0[cal.startOfDay(for: $1.startTime), default: 0] += $1.durationMinutes
+        }
+        let todayMin = byDay[today] ?? 0
+        let priorBest = byDay.filter { $0.key < today }.values.max() ?? 0
+        if todayMin > priorBest, todayMin >= 60 {
+            return PersonalBest(
+                title: "New personal best!",
+                detail: "\(PadStats.fmtMinutes(todayMin)) of focus today — your most ever.",
+                icon: "trophy.fill",
+                color: .yellow
+            )
+        }
+
+        // Streak record.
+        let streakNow = PadStats.currentStreak(sessions)
+        if streakNow >= 7, streakNow == PadStats.bestStreak(sessions) {
+            return PersonalBest(
+                title: "Longest streak yet",
+                detail: "\(streakNow) days in a row. Don't stop.",
+                icon: "flame.fill",
+                color: .orange
+            )
+        }
+
+        // First > 4h day milestone.
+        if todayMin >= 240, priorBest < 240 {
+            return PersonalBest(
+                title: "First 4-hour day",
+                detail: "Crossed the 4-hour mark today.",
+                icon: "sun.max.fill",
+                color: .orange
+            )
+        }
+
+        // Goal-hit celebration.
+        let goalMin = Double(settings.dailyGoalHours) * 60
+        if todayMin >= goalMin, goalMin > 0 {
+            return PersonalBest(
+                title: "Goal hit ✓",
+                detail: "\(PadStats.fmtMinutes(todayMin)) of \(settings.dailyGoalHours)h goal complete. Bonus rounds.",
+                icon: "checkmark.circle.fill",
+                color: FocusColors.goalGreen
+            )
+        }
+
+        return nil
+    }
+
+    private struct PersonalBest {
+        let title: String
+        let detail: String
+        let icon: String
+        let color: Color
+    }
+
+    @ViewBuilder
+    private var personalBestBanner: some View {
+        if let pb = personalBest {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12).fill(pb.color.opacity(0.18)).frame(width: 44, height: 44)
+                    Image(systemName: pb.icon)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(pb.color)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(pb.title).font(.system(size: 15, weight: .semibold))
+                    Text(pb.detail).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: PadTheme.cardRadius, style: .continuous)
+                    .fill(LinearGradient(colors: [pb.color.opacity(0.18), pb.color.opacity(0.06)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: PadTheme.cardRadius)
+                    .stroke(pb.color.opacity(0.35), lineWidth: 1)
+            )
+        }
     }
 
     // MARK: - Helpers

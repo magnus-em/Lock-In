@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import CloudKit
 import FocusCore
 
 struct SettingsScreen: View {
@@ -10,6 +11,8 @@ struct SettingsScreen: View {
     @State private var newTag = ""
     @State private var newSource = ""
     @State private var showInterviewPicker = false
+    @State private var cloudStatus: String = "checking…"
+    @State private var cloudDetail: String = ""
 
     var body: some View {
         Form {
@@ -155,9 +158,25 @@ struct SettingsScreen: View {
 
             Section("Sync") {
                 Toggle("iCloud Sync (CloudKit)", isOn: $settings.cloudKitSyncEnabled)
+                HStack {
+                    Text("Status")
+                    Spacer()
+                    Text(cloudStatus)
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                if !cloudDetail.isEmpty {
+                    Text(cloudDetail).font(.caption).foregroundStyle(.secondary)
+                }
+                Button {
+                    Haptics.tap()
+                    forceSyncProbe()
+                } label: {
+                    Label("Refresh Sync Status", systemImage: "arrow.triangle.2.circlepath")
+                }
                 Text("Changes take effect on next launch. Requires iCloud sign-in.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            .onAppear { forceSyncProbe() }
 
             Section("Danger Zone") {
                 Button(role: .destructive) { clearAllData() } label: {
@@ -178,6 +197,48 @@ struct SettingsScreen: View {
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.large)
+    }
+
+    private func forceSyncProbe() {
+        cloudStatus = "checking…"
+        cloudDetail = ""
+        let container = CKContainer(identifier: FocusModelContainer.cloudKitContainerID)
+        container.accountStatus { status, error in
+            DispatchQueue.main.async {
+                if let error {
+                    self.cloudStatus = "Error"
+                    self.cloudDetail = error.localizedDescription
+                    return
+                }
+                switch status {
+                case .available:
+                    self.cloudStatus = "Signed in"
+                    self.cloudDetail = "Container: \(FocusModelContainer.cloudKitContainerID). If iPad doesn't show Mac data, check that QUIC/UDP isn't blocked on your network — CloudKit prefers HTTP/3."
+                    // Nudge SwiftData by touching a record.
+                    let probe = StoredScratchItem()
+                    probe.text = "__sync_probe__"
+                    probe.order = -999
+                    self.context.insert(probe)
+                    try? self.context.save()
+                    self.context.delete(probe)
+                    try? self.context.save()
+                case .noAccount:
+                    self.cloudStatus = "Not signed in"
+                    self.cloudDetail = "Sign into iCloud in Settings → Apple ID."
+                case .restricted:
+                    self.cloudStatus = "Restricted"
+                    self.cloudDetail = "iCloud restricted by parental controls or MDM."
+                case .couldNotDetermine:
+                    self.cloudStatus = "Unknown"
+                    self.cloudDetail = "Couldn't reach iCloud servers."
+                case .temporarilyUnavailable:
+                    self.cloudStatus = "Temporarily unavailable"
+                    self.cloudDetail = "iCloud is unavailable right now."
+                @unknown default:
+                    self.cloudStatus = "Unknown state"
+                }
+            }
+        }
     }
 
     private func clearAllData() {

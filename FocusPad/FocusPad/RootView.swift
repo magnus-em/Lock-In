@@ -4,7 +4,8 @@ import FocusCore
 /// Sidebar destination IDs. Keeping these as a small enum lets the sidebar
 /// double as both a NavigationSplitView selection AND a compact tab fallback.
 enum PadTab: String, Identifiable, CaseIterable, Hashable {
-    case timer, overview, daylog, problems, homework, scratch, stats, settings
+    case timer, overview, daylog, problems, homework, scratch
+    case stats, insights, awards, settings
     var id: String { rawValue }
 
     var label: String {
@@ -16,6 +17,8 @@ enum PadTab: String, Identifiable, CaseIterable, Hashable {
         case .homework: return "Homework"
         case .scratch:  return "Scratchpad"
         case .stats:    return "Stats"
+        case .insights: return "Insights"
+        case .awards:   return "Awards"
         case .settings: return "Settings"
         }
     }
@@ -29,6 +32,8 @@ enum PadTab: String, Identifiable, CaseIterable, Hashable {
         case .homework: return "book"
         case .scratch:  return "list.bullet.rectangle"
         case .stats:    return "chart.bar.xaxis"
+        case .insights: return "sparkles"
+        case .awards:   return "rosette"
         case .settings: return "gearshape"
         }
     }
@@ -42,6 +47,8 @@ enum PadTab: String, Identifiable, CaseIterable, Hashable {
         case .homework: return .green
         case .scratch:  return .yellow
         case .stats:    return .purple
+        case .insights: return .mint
+        case .awards:   return .yellow
         case .settings: return .gray
         }
     }
@@ -76,9 +83,12 @@ struct RootView: View {
                 }
             }
             Section("Analytics") {
-                ForEach([PadTab.stats, .settings]) { tab in
+                ForEach([PadTab.stats, .insights, .awards]) { tab in
                     sidebarRow(tab)
                 }
+            }
+            Section {
+                sidebarRow(.settings)
             }
         }
         .navigationTitle("Focus")
@@ -105,6 +115,8 @@ struct RootView: View {
         case .homework: HomeworkScreen()
         case .scratch:  ScratchpadScreen()
         case .stats:    StatsScreen()
+        case .insights: InsightsScreen()
+        case .awards:   AwardsScreen()
         case .settings: SettingsScreen()
         }
     }

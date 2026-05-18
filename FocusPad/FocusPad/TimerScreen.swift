@@ -5,6 +5,7 @@ import FocusCore
 struct TimerScreen: View {
     @EnvironmentObject var engine: FocusTimerEngine
     @EnvironmentObject var settings: PadSettings
+    @StateObject private var priorities = TodayPriorities()
 
     @Query(sort: \StoredWorkSession.startTime, order: .reverse) private var sessions: [StoredWorkSession]
     @Query(sort: \StoredDayRecord.calendarDay, order: .reverse) private var dayRecords: [StoredDayRecord]
@@ -12,6 +13,7 @@ struct TimerScreen: View {
     @State private var showBreakSheet = false
     @State private var showCommitment = false
     @State private var showLabelPicker = false
+    @State private var newPriority = ""
 
     var body: some View {
         GeometryReader { geo in
@@ -22,11 +24,16 @@ struct TimerScreen: View {
                     if isWide {
                         HStack(alignment: .top, spacing: 20) {
                             ringPanel.frame(maxWidth: .infinity)
-                            controlsPanel.frame(maxWidth: .infinity)
+                            VStack(spacing: 16) {
+                                controlsPanel
+                                prioritiesCard
+                            }
+                            .frame(maxWidth: .infinity)
                         }
                     } else {
                         ringPanel
                         controlsPanel
+                        prioritiesCard
                     }
                     todayFooter
                 }
@@ -42,7 +49,71 @@ struct TimerScreen: View {
         .sheet(isPresented: $showLabelPicker) { LabelPickerSheet(engine: engine, settings: settings) }
         .onAppear {
             if settings.needsCommitmentToday && dayStarted { showCommitment = true }
+            priorities.load()
         }
+    }
+
+    // MARK: - Priorities card
+
+    private var prioritiesCard: some View {
+        PadCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    PadSectionHeader(title: "TODAY'S PRIORITIES")
+                    Spacer()
+                    Text("\(priorities.items.filter(\.done).count) / \(priorities.items.count) done")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if priorities.items.isEmpty {
+                    Text("Pick the 1-3 most important things to ship today.")
+                        .font(.callout).foregroundStyle(.secondary)
+                } else {
+                    VStack(spacing: 8) {
+                        ForEach(priorities.items) { item in
+                            HStack(spacing: 10) {
+                                Button {
+                                    Haptics.tap()
+                                    priorities.toggle(item)
+                                } label: {
+                                    Image(systemName: item.done ? "checkmark.circle.fill" : "circle")
+                                        .font(.system(size: 22))
+                                        .foregroundStyle(item.done ? FocusColors.goalGreen : .secondary)
+                                }
+                                Text(item.text)
+                                    .strikethrough(item.done)
+                                    .foregroundStyle(item.done ? .secondary : .primary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Button {
+                                    priorities.remove(item)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+                    }
+                }
+                HStack(spacing: 8) {
+                    TextField("Add a priority…", text: $newPriority)
+                        .submitLabel(.done)
+                        .onSubmit { addPriority() }
+                        .padding(.horizontal, 10).padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8).fill(Color(.tertiarySystemFill))
+                        )
+                    if !newPriority.isEmpty {
+                        Button("Add") { addPriority() }
+                            .fontWeight(.semibold)
+                    }
+                }
+            }
+        }
+    }
+
+    private func addPriority() {
+        priorities.add(newPriority)
+        newPriority = ""
+        Haptics.tap()
     }
 
     // MARK: - Day header
@@ -197,7 +268,7 @@ struct TimerScreen: View {
     private var primaryControlButtons: some View {
         HStack(spacing: 10) {
             if !engine.isActive {
-                Button { engine.start() } label: {
+                Button { Haptics.medium(); engine.start() } label: {
                     Label("Start", systemImage: "play.fill")
                         .font(.system(size: 17, weight: .semibold))
                         .frame(maxWidth: .infinity)
@@ -206,7 +277,7 @@ struct TimerScreen: View {
                 .buttonStyle(.borderedProminent)
                 .tint(engine.phase == .work ? FocusColors.focusRed : FocusColors.breakBlue)
             } else {
-                Button { engine.toggleRunPause() } label: {
+                Button { Haptics.tap(); engine.toggleRunPause() } label: {
                     Label(engine.isRunning ? "Pause" : "Resume",
                           systemImage: engine.isRunning ? "pause.fill" : "play.fill")
                         .font(.system(size: 17, weight: .semibold))
@@ -217,6 +288,7 @@ struct TimerScreen: View {
                 .tint(engine.phase == .work ? FocusColors.focusRed : FocusColors.breakBlue)
 
                 Button {
+                    Haptics.warning()
                     if engine.phase == .breakPhase { engine.skip() } else { engine.stop() }
                 } label: {
                     Label(engine.phase == .breakPhase ? "Skip" : "Stop",
