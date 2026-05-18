@@ -1,4 +1,5 @@
 import SwiftUI
+import CloudKit
 import FocusCore
 
 struct SettingsView: View {
@@ -8,6 +9,9 @@ struct SettingsView: View {
     var openOnboarding: (() -> Void)? = nil
     @State private var showResetConfirm = false
     @State private var newSourceText = ""
+    @State private var cloudStatus: String = "checking…"
+    @State private var cloudDetail: String = ""
+    @State private var cloudStatusColor: Color = .secondary
 
     // Manual session logging
     @State private var manualMinutes: Int = 60
@@ -45,6 +49,39 @@ struct SettingsView: View {
 
                 SectionLabel("DAILY GOAL")
                 IntRow(label: "Daily Target", value: $settings.dailyGoal, range: 0...12, suffix: "h", zeroLabel: "Off")
+
+                Divider()
+
+                SectionLabel("ICLOUD SYNC")
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Circle().fill(cloudStatusColor).frame(width: 8, height: 8)
+                        Text(cloudStatus)
+                            .font(.system(size: 12, weight: .medium))
+                        Spacer()
+                        Button { probeSync() } label: {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.system(size: 11))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                    }
+                    if !cloudDetail.isEmpty {
+                        Text(cloudDetail)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+                    Text("Container: \(FocusModelContainer.cloudKitContainerID)")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .textSelection(.enabled)
+                }
+                .padding(.horizontal, 8).padding(.vertical, 6)
+                .background(Color.secondary.opacity(0.05))
+                .cornerRadius(7)
+                .onAppear { probeSync() }
 
                 Divider()
 
@@ -356,6 +393,83 @@ struct SettingsView: View {
         guard !t.isEmpty, !settings.problemSources.contains(t) else { newSourceText = ""; return }
         settings.problemSources.append(t)
         newSourceText = ""
+    }
+
+    // MARK: - iCloud probe
+
+    private func probeSync() {
+        cloudStatus = "checking…"
+        cloudDetail = ""
+        cloudStatusColor = .secondary
+        let container = CKContainer(identifier: FocusModelContainer.cloudKitContainerID)
+        container.accountStatus { status, error in
+            DispatchQueue.main.async {
+                if let error {
+                    cloudStatus = "Error"
+                    cloudStatusColor = .red
+                    cloudDetail = error.localizedDescription
+                    return
+                }
+                switch status {
+                case .available:
+                    probeZoneAccess(container: container)
+                case .noAccount:
+                    cloudStatus = "Not signed in to iCloud"
+                    cloudStatusColor = .orange
+                    cloudDetail = "Sign into iCloud in System Settings → Apple Account."
+                case .restricted:
+                    cloudStatus = "Restricted"
+                    cloudStatusColor = .red
+                    cloudDetail = "iCloud restricted by parental controls or MDM."
+                case .couldNotDetermine:
+                    cloudStatus = "Unknown"
+                    cloudStatusColor = .orange
+                    cloudDetail = "Couldn't reach iCloud servers."
+                case .temporarilyUnavailable:
+                    cloudStatus = "Temporarily unavailable"
+                    cloudStatusColor = .orange
+                default:
+                    cloudStatus = "Unknown"
+                    cloudStatusColor = .orange
+                }
+            }
+        }
+    }
+
+    private func probeZoneAccess(container: CKContainer) {
+        let db = container.privateCloudDatabase
+        let op = CKFetchRecordZonesOperation.fetchAllRecordZonesOperation()
+        op.fetchRecordZonesResultBlock = { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success:
+                    cloudStatus = "Working ✓"
+                    cloudStatusColor = .green
+                    cloudDetail = "Sync is healthy. Changes propagate automatically."
+                case .failure(let err):
+                    if let ck = err as? CKError {
+                        let serverMessage = ck.userInfo["ServerErrorDescription"] as? String ?? ""
+                        let code = ck.code.rawValue
+                        cloudStatusColor = .orange
+                        if serverMessage.contains("Invalid bundle ID") {
+                            cloudStatus = "Setup needed"
+                            cloudDetail = "Server: \(serverMessage)\n\nThe CloudKit container isn't associated with this app's bundle ID at Apple Developer Portal. See SETUP_CLOUDKIT.md."
+                        } else if !serverMessage.isEmpty {
+                            cloudStatus = "Error"
+                            cloudDetail = "Server: \(serverMessage) (code \(code))"
+                        } else {
+                            cloudStatus = "Error"
+                            cloudDetail = "CKError \(code): \(err.localizedDescription)"
+                        }
+                    } else {
+                        cloudStatus = "Error"
+                        cloudStatusColor = .red
+                        cloudDetail = err.localizedDescription
+                    }
+                }
+            }
+        }
+        db.add(op)
     }
 }
 

@@ -4,7 +4,7 @@ import SwiftData
 public enum FocusModelContainer {
     /// CloudKit container identifier — must match the iCloud entitlement
     /// configured in App Store Connect / the Xcode project settings.
-    public static let cloudKitContainerID = "iCloud.com.magnus.focus"
+    public static let cloudKitContainerID = "iCloud.com.magnus.focustracker"
 
     /// Build the SwiftData container. When `cloudKitSync` is true, data syncs
     /// to the user's iCloud private database. Requires the iCloud entitlement
