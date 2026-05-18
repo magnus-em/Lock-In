@@ -27,6 +27,10 @@ private func runOneShotMigration() {
     if !result.alreadyMigrated {
         print("[FocusMigration] sessions=\(result.sessions) problems=\(result.problems) homework=\(result.homework) days=\(result.dayRecords) scratch=\(result.scratch)")
     }
+    // Idempotent — guards against any historical Mac+iPad double-saves that
+    // were committed before the insert-time dedup landed.
+    let removed = FocusMigration.dedupeWorkSessions(container: focusContainer)
+    if removed > 0 { print("[FocusDedup] removed \(removed) duplicate session(s)") }
 }
 
 @main

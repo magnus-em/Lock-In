@@ -46,8 +46,17 @@ public final class SyncedDefaults {
     ]
 
     private init() {
-        // Pull whatever iCloud has down to local defaults on launch.
-        importRemote()
+        // ONLY pull from iCloud the very first time this device sees the
+        // synced-settings layer. After that, local UserDefaults is the
+        // source of truth — incoming KVS changes come in via the
+        // didChangeExternally observer, which fires only when *iCloud*
+        // says it has newer data. This prevents the launch import from
+        // clobbering a value the user just changed locally.
+        let firstRunKey = "syncedDefaults.didImportOnce"
+        if !defaults.bool(forKey: firstRunKey) {
+            importRemote()
+            defaults.set(true, forKey: firstRunKey)
+        }
 
         observer = NotificationCenter.default.addObserver(
             forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
@@ -56,7 +65,8 @@ public final class SyncedDefaults {
             self?.handleExternalChange(note)
         }
 
-        // Kick the KVS to fetch the latest snapshot.
+        // Kick the KVS to fetch the latest snapshot. If it has newer data,
+        // didChangeExternally will fire and the observer will handle it.
         kvs.synchronize()
     }
 
