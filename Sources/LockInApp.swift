@@ -202,31 +202,49 @@ struct PopoverContent: View {
 
                 Divider()
 
-                HStack {
-                    Button {
-                        openDashboard()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "rectangle.expand.diagonal")
-                                .font(.system(size: 10))
-                            Text("Dashboard")
-                                .font(.system(size: 11))
-                        }
-                        .foregroundStyle(.secondary)
+                // Prominent Dashboard CTA — clearer affordance than the
+                // tiny secondary link we used before.
+                Button {
+                    openDashboard()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "chart.bar.doc.horizontal.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("Open Dashboard")
+                            .font(.system(size: 13, weight: .semibold))
+                        Spacer()
+                        Image(systemName: "arrow.up.right.square")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
                     }
-                    .buttonStyle(.plain)
+                    .foregroundStyle(Color(red: 0.96, green: 0.36, blue: 0.36))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 9)
+                            .fill(Color(red: 0.96, green: 0.36, blue: 0.36).opacity(0.10))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 9)
+                            .stroke(Color(red: 0.96, green: 0.36, blue: 0.36).opacity(0.22), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
 
+                HStack {
                     Spacer()
-
                     Button("Quit Focus") {
                         NSApplication.shared.terminate(nil)
                     }
                     .buttonStyle(.plain)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 6)
+                .padding(.top, 4)
+                .padding(.bottom, 6)
             }
 
             if showCommitment {

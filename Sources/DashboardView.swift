@@ -287,6 +287,9 @@ struct DashboardView: View {
                 problemProgressSection
                 weeklySection
                 focusSplitSection
+                heatmapSection
+                narrativeInsightsSection
+                awardsSection
                 HStack(alignment: .top, spacing: 10) {
                     insightsSection
                     weakAreasSection
@@ -295,6 +298,337 @@ struct DashboardView: View {
             }
             .padding(14)
         }
+    }
+
+    // MARK: - 18-week heatmap
+
+    private var heatmapSection: some View {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let earliest = cal.date(byAdding: .day, value: -(18 * 7 - 1), to: today)!
+        let workSessions = sessionStore.sessions.filter { $0.type == .work && $0.startTime >= earliest }
+        var minutesByDay: [Date: Double] = [:]
+        for s in workSessions {
+            let d = cal.startOfDay(for: s.startTime)
+            minutesByDay[d, default: 0] += s.durationMinutes
+        }
+        let weekday = cal.component(.weekday, from: today)
+        let mondayOffset = ((weekday + 5) % 7)
+        let thisWeekMonday = cal.date(byAdding: .day, value: -mondayOffset, to: today)!
+        let startDay = cal.date(byAdding: .weekOfYear, value: -17, to: thisWeekMonday)!
+        let total = minutesByDay.values.reduce(0, +)
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                sectionLabel("ACTIVITY · 18 WEEKS")
+                Spacer()
+                Text(fmtHours(total / 60.0))
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 2) {
+                    ForEach(0..<18, id: \.self) { w in
+                        VStack(spacing: 2) {
+                            ForEach(0..<7, id: \.self) { d in
+                                let day = cal.date(byAdding: .day, value: w * 7 + d, to: startDay)!
+                                heatmapCell(minutes: minutesByDay[cal.startOfDay(for: day)] ?? 0,
+                                            isFuture: day > Date())
+                            }
+                        }
+                    }
+                }
+            }
+            HStack(spacing: 4) {
+                Text("Less").font(.system(size: 9)).foregroundStyle(.tertiary)
+                ForEach([0.0, 60.0, 120.0, 200.0, 320.0], id: \.self) { m in
+                    heatmapSwatch(minutes: m)
+                }
+                Text("More").font(.system(size: 9)).foregroundStyle(.tertiary)
+            }
+        }
+        .padding(12)
+        .glassCard(cornerRadius: 10)
+    }
+
+    private func heatmapCell(minutes: Double, isFuture: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 2)
+            .fill(isFuture ? Color.gray.opacity(0.05) : heatmapColor(minutes))
+            .frame(width: 11, height: 11)
+    }
+    private func heatmapSwatch(minutes: Double) -> some View {
+        RoundedRectangle(cornerRadius: 2)
+            .fill(heatmapColor(minutes))
+            .frame(width: 9, height: 9)
+    }
+    private func heatmapColor(_ minutes: Double) -> Color {
+        if minutes <= 0 { return Color.gray.opacity(0.18) }
+        switch minutes {
+        case ..<30:   return red.opacity(0.22)
+        case ..<90:   return red.opacity(0.40)
+        case ..<180:  return red.opacity(0.60)
+        case ..<300:  return red.opacity(0.80)
+        default:      return red
+        }
+    }
+
+    // MARK: - Narrative insights ("Wednesday is your power day", etc.)
+
+    private struct NarrativeInsight: Identifiable {
+        let id: String
+        let kind: Kind
+        let headline: String
+        let body: String
+        enum Kind { case positive, neutral, attention }
+    }
+
+    private var narrativeInsightsList: [NarrativeInsight] {
+        var out: [NarrativeInsight] = []
+        let work = sessionStore.sessions.filter { $0.type == .work }
+        let cal = Calendar.current
+
+        // Peak weekday
+        if work.count >= 10 {
+            var byWeekday: [Int: Double] = [:]
+            for s in work {
+                let wd = cal.component(.weekday, from: s.startTime)
+                byWeekday[wd, default: 0] += s.durationMinutes
+            }
+            if let best = byWeekday.max(by: { $0.value < $1.value }) {
+                let name = cal.weekdaySymbols[best.key - 1]
+                out.append(.init(
+                    id: "bestDay", kind: .positive,
+                    headline: "\(name) is your power day",
+                    body: "\(fmtMins(best.value)) of focus on \(name)s overall — your most of any weekday."
+                ))
+            }
+
+            // Peak hour
+            var byHour: [Int: Double] = [:]
+            for s in work {
+                let h = cal.component(.hour, from: s.startTime)
+                byHour[h, default: 0] += s.durationMinutes
+            }
+            if let best = byHour.max(by: { $0.value < $1.value }) {
+                let label: String
+                switch best.key {
+                case 5..<9:   label = "early-morning"
+                case 9..<12:  label = "mid-morning"
+                case 12..<14: label = "lunchtime"
+                case 14..<17: label = "afternoon"
+                case 17..<20: label = "evening"
+                case 20..<24: label = "late-evening"
+                default:      label = "overnight"
+                }
+                let mod = best.key % 12 == 0 ? 12 : best.key % 12
+                let ampm = best.key < 12 ? "AM" : "PM"
+                out.append(.init(
+                    id: "peakHour", kind: .neutral,
+                    headline: "Your sharpest hour: \(mod) \(ampm)",
+                    body: "You do your most focused work in the \(label) block. Try guarding that window."
+                ))
+            }
+        }
+
+        // Week-over-week
+        let thisWeek = sessionStore.last7DaysMinutes
+        let lastWeek = sessionStore.prior7DaysMinutes
+        if lastWeek > 30 {
+            let delta = thisWeek - lastWeek
+            let pct = delta / lastWeek * 100
+            if abs(pct) < 10 {
+                out.append(.init(id: "wow-flat", kind: .neutral,
+                                 headline: "Steady week",
+                                 body: "About the same focus as last week (\(fmtMins(thisWeek)) vs \(fmtMins(lastWeek)))."))
+            } else if delta > 0 {
+                out.append(.init(id: "wow-up", kind: .positive,
+                                 headline: "Up \(Int(pct))% vs last week",
+                                 body: "\(fmtMins(thisWeek)) so far this week, up from \(fmtMins(lastWeek)). Momentum."))
+            } else {
+                out.append(.init(id: "wow-down", kind: .attention,
+                                 headline: "Down \(Int(abs(pct)))% vs last week",
+                                 body: "\(fmtMins(thisWeek)) vs \(fmtMins(lastWeek)). Worth checking — what's different?"))
+            }
+        }
+
+        // Consistency dip
+        let c7 = sessionStore.consistencyScore(days: 7)
+        let c30 = sessionStore.consistencyScore(days: 30)
+        if work.count >= 5 {
+            if c7 >= 0.9 {
+                out.append(.init(id: "consistency-high", kind: .positive,
+                                 headline: "Hit every day this week",
+                                 body: "\(Int(c7 * 7))/7 of the last week. The habit is working."))
+            } else if c7 < c30 - 0.15 {
+                out.append(.init(id: "consistency-dip", kind: .attention,
+                                 headline: "Consistency dipped this week",
+                                 body: "Last 7 days: \(Int(c7 * 100))%. Last 30 days: \(Int(c30 * 100))%. Don't break the chain."))
+            }
+        }
+
+        return out
+    }
+
+    private var narrativeInsightsSection: some View {
+        let insights = narrativeInsightsList
+        return VStack(alignment: .leading, spacing: 8) {
+            sectionLabel("PATTERNS")
+            if insights.isEmpty {
+                Text("Log a few more focus sessions and patterns will appear here.")
+                    .font(.system(size: 11)).foregroundStyle(.tertiary)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(insights) { insight in
+                        HStack(alignment: .top, spacing: 10) {
+                            let c = insightColor(insight.kind)
+                            ZStack {
+                                Circle().fill(c.opacity(0.18)).frame(width: 26, height: 26)
+                                Image(systemName: insightIcon(insight.kind))
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(c)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(insight.headline)
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text(insight.body)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .glassCard(cornerRadius: 10)
+    }
+
+    private func insightColor(_ k: NarrativeInsight.Kind) -> Color {
+        switch k {
+        case .positive:  return green
+        case .neutral:   return blue
+        case .attention: return amber
+        }
+    }
+    private func insightIcon(_ k: NarrativeInsight.Kind) -> String {
+        switch k {
+        case .positive:  return "checkmark.seal.fill"
+        case .neutral:   return "info.circle.fill"
+        case .attention: return "lightbulb.fill"
+        }
+    }
+
+    // MARK: - Awards (Fitness-style milestones)
+
+    private struct Award: Identifiable {
+        let id: String
+        let title: String
+        let subtitle: String
+        let icon: String
+        let earned: Bool
+        let progress: String
+    }
+
+    private var allAwards: [Award] {
+        let work = sessionStore.sessions.filter { $0.type == .work }
+        let totalSessions = work.count
+        let totalHours = work.reduce(0) { $0 + $1.durationMinutes } / 60
+        let bestStreak = sessionStore.bestStreak
+        let bestDayMin = sessionStore.bestDayMinutes
+
+        return [
+            .init(id: "first", title: "First Session", subtitle: "Complete one focus session",
+                  icon: "flag.fill", earned: totalSessions >= 1,
+                  progress: totalSessions >= 1 ? "Earned" : "0/1"),
+            .init(id: "ten", title: "Getting Going", subtitle: "10 sessions",
+                  icon: "10.circle.fill", earned: totalSessions >= 10,
+                  progress: "\(min(totalSessions, 10))/10"),
+            .init(id: "hundred", title: "Centurion", subtitle: "100 sessions",
+                  icon: "100.circle.fill", earned: totalSessions >= 100,
+                  progress: "\(min(totalSessions, 100))/100"),
+            .init(id: "10h", title: "Deep End", subtitle: "10 hours",
+                  icon: "hourglass.bottomhalf.filled", earned: totalHours >= 10,
+                  progress: String(format: "%.0f/10h", min(totalHours, 10))),
+            .init(id: "50h", title: "Half a Hundred", subtitle: "50 hours",
+                  icon: "hourglass", earned: totalHours >= 50,
+                  progress: String(format: "%.0f/50h", min(totalHours, 50))),
+            .init(id: "100h", title: "Triple Digits", subtitle: "100 hours",
+                  icon: "trophy.fill", earned: totalHours >= 100,
+                  progress: String(format: "%.0f/100h", min(totalHours, 100))),
+            .init(id: "s3", title: "On a Roll", subtitle: "3-day streak",
+                  icon: "flame.fill", earned: bestStreak >= 3,
+                  progress: "\(min(bestStreak, 3))/3"),
+            .init(id: "s7", title: "Full Week", subtitle: "7-day streak",
+                  icon: "flame.fill", earned: bestStreak >= 7,
+                  progress: "\(min(bestStreak, 7))/7"),
+            .init(id: "s30", title: "Monthly Habit", subtitle: "30-day streak",
+                  icon: "flame.circle.fill", earned: bestStreak >= 30,
+                  progress: "\(min(bestStreak, 30))/30"),
+            .init(id: "d4", title: "Solid Day", subtitle: "4h in one day",
+                  icon: "sun.max.fill", earned: bestDayMin >= 240,
+                  progress: String(format: "%.1f/4h", min(bestDayMin / 60, 4))),
+            .init(id: "d8", title: "Marathon", subtitle: "8h in one day",
+                  icon: "sun.horizon.fill", earned: bestDayMin >= 480,
+                  progress: String(format: "%.1f/8h", min(bestDayMin / 60, 8))),
+            .init(id: "p1", title: "First Solve", subtitle: "Log one problem",
+                  icon: "checkmark.circle.fill", earned: problemStore.totalCount >= 1,
+                  progress: problemStore.totalCount >= 1 ? "Earned" : "0/1"),
+            .init(id: "p50", title: "Pattern Recognizer", subtitle: "50 problems",
+                  icon: "brain.head.profile", earned: problemStore.totalCount >= 50,
+                  progress: "\(min(problemStore.totalCount, 50))/50"),
+            .init(id: "p200", title: "Quant Cohort", subtitle: "200 problems",
+                  icon: "function", earned: problemStore.totalCount >= 200,
+                  progress: "\(min(problemStore.totalCount, 200))/200"),
+        ]
+    }
+
+    private var awardsSection: some View {
+        let awards = allAwards
+        let earned = awards.filter(\.earned).count
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                sectionLabel("AWARDS")
+                Spacer()
+                Text("\(earned) / \(awards.count)")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            LazyVGrid(columns: Array(repeating: .init(.flexible(), spacing: 8), count: 4), spacing: 8) {
+                ForEach(awards) { a in
+                    awardTile(a)
+                }
+            }
+        }
+        .padding(12)
+        .glassCard(cornerRadius: 10)
+    }
+
+    private func awardTile(_ a: Award) -> some View {
+        VStack(spacing: 4) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(a.earned ? amber.opacity(0.2) : Color.secondary.opacity(0.1))
+                    .frame(width: 36, height: 36)
+                Image(systemName: a.icon)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(a.earned ? amber : .secondary)
+                    .opacity(a.earned ? 1 : 0.5)
+            }
+            Text(a.title)
+                .font(.system(size: 10, weight: .semibold))
+                .lineLimit(1)
+                .foregroundStyle(a.earned ? .primary : .secondary)
+            Text(a.progress)
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundStyle(a.earned ? AnyShapeStyle(amber) : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 6)
+        .background(Color.secondary.opacity(0.04))
+        .cornerRadius(8)
     }
 
     // MARK: - Day timeline
