@@ -119,6 +119,9 @@ public final class StoredHomework {
     public var usedAI: Bool = false
     public var notes: String = ""
     public var urlString: String = ""
+    /// Optional link back to a catalog problem (e.g. Stat 110 HW2 #3).
+    /// Nil for manually-entered homework. See `Stat110Catalog`.
+    public var catalogID: String? = nil
 
     public init() {}
 
@@ -133,6 +136,7 @@ public final class StoredHomework {
         self.usedAI = value.usedAI
         self.notes = value.notes
         self.urlString = value.url
+        self.catalogID = value.catalogID
     }
 
     public var difficulty: ProblemDifficulty {
@@ -148,7 +152,8 @@ public final class StoredHomework {
     public var asValue: HomeworkProblem {
         HomeworkProblem(id: id, date: date, title: title, source: source,
                         difficulty: difficulty, confidence: confidence,
-                        usedAI: usedAI, notes: notes, url: urlString)
+                        usedAI: usedAI, notes: notes, url: urlString,
+                        catalogID: catalogID)
     }
 }
 

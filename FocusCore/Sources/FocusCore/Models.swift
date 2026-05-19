@@ -171,10 +171,14 @@ public struct HomeworkProblem: Codable, Identifiable, Sendable {
     public var usedAI: Bool
     public var notes: String
     public var url: String
+    /// Links this entry back to a `Stat110Problem` (or any future catalog).
+    /// Nil for manually-typed entries; non-nil when the user picked from
+    /// a course catalog — we use it to mark catalog items as "done."
+    public var catalogID: String?
 
     public init(title: String, source: String = "", difficulty: ProblemDifficulty = .medium,
                 confidence: Confidence = .solid, usedAI: Bool = false,
-                notes: String = "", url: String = "") {
+                notes: String = "", url: String = "", catalogID: String? = nil) {
         self.id = UUID()
         self.date = Date()
         self.title = title
@@ -184,11 +188,13 @@ public struct HomeworkProblem: Codable, Identifiable, Sendable {
         self.usedAI = usedAI
         self.notes = notes
         self.url = url
+        self.catalogID = catalogID
     }
 
     public init(id: UUID, date: Date, title: String, source: String = "",
                 difficulty: ProblemDifficulty = .medium, confidence: Confidence = .solid,
-                usedAI: Bool = false, notes: String = "", url: String = "") {
+                usedAI: Bool = false, notes: String = "", url: String = "",
+                catalogID: String? = nil) {
         self.id = id
         self.date = date
         self.title = title
@@ -198,6 +204,7 @@ public struct HomeworkProblem: Codable, Identifiable, Sendable {
         self.usedAI = usedAI
         self.notes = notes
         self.url = url
+        self.catalogID = catalogID
     }
 }
 

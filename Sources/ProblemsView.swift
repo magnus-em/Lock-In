@@ -13,6 +13,8 @@ struct ProblemsView: View {
     @State private var reviewExpanded = true
     @State private var homeworkExpanded = false
     @State private var showHomeworkLog = false
+    @State private var homeworkPrefill: Stat110PickerPrefill? = nil
+    @State private var showStat110Picker = false
     @State private var editingHomework: HomeworkProblem? = nil
 
     var body: some View {
@@ -50,9 +52,32 @@ struct ProblemsView: View {
             }
 
             if showHomeworkLog {
-                HomeworkLogOverlay(store: homeworkStore, settings: settings, isShowing: $showHomeworkLog)
-                    .transition(.opacity.animation(.easeInOut(duration: 0.15)))
-                    .zIndex(3)
+                HomeworkLogOverlay(
+                    store: homeworkStore, settings: settings,
+                    isShowing: $showHomeworkLog,
+                    prefill: homeworkPrefill
+                )
+                .transition(.opacity.animation(.easeInOut(duration: 0.15)))
+                .zIndex(3)
+            }
+
+            if showStat110Picker {
+                Stat110PickerOverlay(
+                    completedIDs: Set(homeworkStore.items.compactMap { $0.catalogID }),
+                    isShowing: $showStat110Picker
+                ) { picked in
+                    homeworkPrefill = Stat110PickerPrefill(
+                        title: picked.title,
+                        source: picked.sourceLabel,
+                        catalogID: picked.id
+                    )
+                    showStat110Picker = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        showHomeworkLog = true
+                    }
+                }
+                .transition(.opacity.animation(.easeInOut(duration: 0.15)))
+                .zIndex(5)
             }
 
             if let editing = editingHomework {
@@ -113,7 +138,25 @@ struct ProblemsView: View {
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(.tertiary)
                     Spacer()
-                    Button { showHomeworkLog = true } label: {
+                    Button {
+                        showStat110Picker = true
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "books.vertical").font(.system(size: 9))
+                            Text("Stat 110").font(.system(size: 9, weight: .semibold))
+                        }
+                        .foregroundStyle(purple)
+                        .padding(.horizontal, 6).padding(.vertical, 3)
+                        .background(purple.opacity(0.12))
+                        .cornerRadius(5)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Pick a problem from the Stat 110 catalog")
+
+                    Button {
+                        homeworkPrefill = nil
+                        showHomeworkLog = true
+                    } label: {
                         Image(systemName: "plus")
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(.secondary)
@@ -1172,6 +1215,7 @@ struct HomeworkLogOverlay: View {
     @ObservedObject var store: HomeworkStore
     @ObservedObject var settings: AppSettings
     @Binding var isShowing: Bool
+    var prefill: Stat110PickerPrefill? = nil
 
     @State private var title = ""
     @State private var source = "Homework"
@@ -1214,7 +1258,8 @@ struct HomeworkLogOverlay: View {
                         difficulty: difficulty, confidence: confidence,
                         usedAI: usedAI,
                         notes: notes.trimmingCharacters(in: .whitespaces),
-                        url: url.trimmingCharacters(in: .whitespaces)
+                        url: url.trimmingCharacters(in: .whitespaces),
+                        catalogID: prefill?.catalogID
                     ))
                     isShowing = false
                 } label: {
@@ -1230,6 +1275,12 @@ struct HomeworkLogOverlay: View {
                 .buttonStyle(.plain)
                 .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
                 .padding(16)
+            }
+        }
+        .onAppear {
+            if let p = prefill {
+                title = p.title
+                source = p.source
             }
         }
     }

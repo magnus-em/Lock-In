@@ -7,6 +7,8 @@ struct HomeworkScreen: View {
     @EnvironmentObject var settings: PadSettings
     @Query(sort: \StoredHomework.date, order: .reverse) private var items: [StoredHomework]
     @State private var showAdd = false
+    @State private var showStat110 = false
+    @State private var prefill: AddHomeworkSheet.Prefill? = nil
     @State private var searchText = ""
 
     private var todayCount: Int {
@@ -58,11 +60,39 @@ struct HomeworkScreen: View {
         .searchable(text: $searchText, prompt: "Search homework")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { Haptics.tap(); showAdd = true } label: { Image(systemName: "plus") }
+                Menu {
+                    Button {
+                        Haptics.tap(); showStat110 = true
+                    } label: { Label("Browse Stat 110", systemImage: "books.vertical") }
+                    Button {
+                        Haptics.tap(); prefill = nil; showAdd = true
+                    } label: { Label("Add manually", systemImage: "square.and.pencil") }
+                } label: {
+                    Image(systemName: "plus")
+                }
             }
         }
-        .sheet(isPresented: $showAdd) { AddHomeworkSheet() }
+        .sheet(isPresented: $showAdd) {
+            AddHomeworkSheet(prefill: prefill)
+        }
+        .sheet(isPresented: $showStat110) {
+            Stat110PickerSheet(completedIDs: completedCatalogIDs) { picked in
+                showStat110 = false
+                prefill = AddHomeworkSheet.Prefill(
+                    title: picked.title,
+                    source: picked.sourceLabel,
+                    catalogID: picked.id
+                )
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    showAdd = true
+                }
+            }
+        }
         .background(Color(.systemGroupedBackground).ignoresSafeArea())
+    }
+
+    private var completedCatalogIDs: Set<String> {
+        Set(items.compactMap { $0.catalogID })
     }
 
     private func delete(at offsets: IndexSet) {
@@ -168,8 +198,16 @@ private struct HomeworkRow: View {
 }
 
 struct AddHomeworkSheet: View {
+    struct Prefill: Equatable {
+        var title: String = ""
+        var source: String = ""
+        var catalogID: String? = nil
+    }
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
+
+    let prefill: Prefill?
 
     @State private var title = ""
     @State private var source = ""
@@ -178,6 +216,12 @@ struct AddHomeworkSheet: View {
     @State private var confidence: Confidence = .solid
     @State private var usedAI = false
     @State private var notes = ""
+
+    init(prefill: Prefill? = nil) {
+        self.prefill = prefill
+        _title = State(initialValue: prefill?.title ?? "")
+        _source = State(initialValue: prefill?.source ?? "")
+    }
 
     var body: some View {
         NavigationStack {
@@ -221,7 +265,8 @@ struct AddHomeworkSheet: View {
             title: title.trimmingCharacters(in: .whitespaces),
             source: source, difficulty: difficulty, confidence: confidence,
             usedAI: usedAI, notes: notes.trimmingCharacters(in: .whitespaces),
-            url: url.trimmingCharacters(in: .whitespaces)
+            url: url.trimmingCharacters(in: .whitespaces),
+            catalogID: prefill?.catalogID
         )
         context.insert(StoredHomework(value: item))
         try? context.save()
