@@ -50,9 +50,20 @@ cat > "$APP_DIR/Info.plist" <<'EOF'
 EOF
 
 # Embed the Mac provisioning profile (required because the entitlements
-# request iCloud + CloudKit, which is a restricted entitlement). Xcode
-# auto-generates this profile the first time the project is opened.
-PROFILE="build/DerivedData/Build/Products/Debug/Focus.app/Contents/embedded.provisionprofile"
+# request iCloud + CloudKit + APNS, which are restricted entitlements).
+# Run xcodebuild against Focus.xcodeproj first so Xcode regenerates a
+# fresh profile that covers the *current* entitlements file — otherwise
+# we end up with a stale profile from a previous container/aps-environment
+# config and launchd refuses to spawn ("Unsatisfied entitlements").
+# We build into /tmp to avoid iCloud-Drive xattrs corrupting codesign.
+XCBUILD_DD="/tmp/FocusDerivedData"
+PROFILE="$XCBUILD_DD/Build/Products/Debug/Focus.app/Contents/embedded.provisionprofile"
+if [ ! -f "$PROFILE" ] || [ Focus.entitlements -nt "$PROFILE" ]; then
+    echo "Regenerating provisioning profile via xcodebuild..."
+    rm -rf "$XCBUILD_DD"
+    xcodebuild -project Focus.xcodeproj -scheme Focus -configuration Debug \
+        -derivedDataPath "$XCBUILD_DD" -allowProvisioningUpdates build >/dev/null
+fi
 if [ -f "$PROFILE" ]; then
     cp "$PROFILE" "$APP_DIR/embedded.provisionprofile"
 fi

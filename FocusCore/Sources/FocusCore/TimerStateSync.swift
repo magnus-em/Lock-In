@@ -26,7 +26,12 @@ public final class TimerStateSync: ObservableObject, @unchecked Sendable {
 
     public var onRemoteChange: ((StoredTimerState) -> Void)?
 
+    /// Fired after a debounced post-import dedup pass so the host app can
+    /// refresh any caches/views that show session totals.
+    public var onPostImportSettled: (() -> Void)?
+
     private var remoteChangeObserver: NSObjectProtocol?
+    private var dedupWorkItem: DispatchWorkItem?
 
     public init(container: ModelContainer) {
         self.container = container
@@ -48,6 +53,7 @@ public final class TimerStateSync: ObservableObject, @unchecked Sendable {
             queue: .main
         ) { [weak self] _ in
             self?.checkForRemote()
+            self?.scheduleDedupAfterImport()
         }
 
         start()
@@ -114,6 +120,25 @@ public final class TimerStateSync: ObservableObject, @unchecked Sendable {
         guard state.updatedAt > lastSeenUpdatedAt else { return }
         lastSeenUpdatedAt = state.updatedAt
         onRemoteChange?(state)
+    }
+
+    /// Debounce a strict-dedup pass for ~3s after CloudKit reports new
+    /// remote changes. Strict match (whole-second startTime + type + label
+    /// + duration to 0.01 min) means we only ever collapse byte-identical
+    /// rows — the exact failure mode where Mac and iPad both insert a row
+    /// for the same broadcast-driven event with different UUIDs.
+    private func scheduleDedupAfterImport() {
+        dedupWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let removed = FocusMigration.dedupeWorkSessions(container: self.container)
+            if removed > 0 {
+                print("[TimerStateSync] post-import dedup removed \(removed) duplicate session(s)")
+            }
+            self.onPostImportSettled?()
+        }
+        dedupWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0, execute: item)
     }
 
     private static func persistedDeviceID() -> String {

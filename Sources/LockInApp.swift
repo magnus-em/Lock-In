@@ -27,9 +27,13 @@ private func runOneShotMigration() {
     if !result.alreadyMigrated {
         print("[FocusMigration] sessions=\(result.sessions) problems=\(result.problems) homework=\(result.homework) days=\(result.dayRecords) scratch=\(result.scratch)")
     }
-    // Dedup is NOT auto-run anymore — even a strict match can be wrong if
-    // the data isn't actually duplicated (e.g. two legitimate identical
-    // 60-min Quant sessions back-to-back). Trigger manually via Settings.
+    // Strict dedup at startup — safe because the key includes whole-second
+    // start, type, label, AND duration rounded to 0.01 min. Two genuinely
+    // distinct sessions (even back-to-back 60-min Quant blocks) won't match
+    // because their startTime seconds differ. Only byte-identical CloudKit
+    // double-imports collapse.
+    let removed = FocusMigration.dedupeWorkSessions(container: focusContainer)
+    if removed > 0 { print("[FocusMigration] startup dedup removed \(removed) duplicate session(s)") }
 }
 
 @main

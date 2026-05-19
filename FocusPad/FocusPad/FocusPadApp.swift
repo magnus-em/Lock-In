@@ -21,9 +21,13 @@ struct FocusPadApp: App {
         }
         self.container = c
 
-        // Dedup runs on user request (Settings → Clean Duplicate Sessions),
-        // not automatically. Auto-fire can wrongly delete legitimately
-        // identical back-to-back sessions.
+        // Strict dedup at startup — key is whole-second startTime + type +
+        // label + duration rounded to 0.01 min, so legitimately identical
+        // back-to-back sessions don't collapse (their start seconds differ).
+        // Catches the actual failure mode: Mac and iPad both inserting a row
+        // for the same broadcast event with different UUIDs.
+        let removed = FocusMigration.dedupeWorkSessions(container: c)
+        if removed > 0 { print("[FocusPad] startup dedup removed \(removed) duplicate session(s)") }
 
         let s = PadSettings()
         _settings = StateObject(wrappedValue: s)
