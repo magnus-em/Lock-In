@@ -99,13 +99,24 @@ public final class FocusTimerEngine: ObservableObject {
         localBroadcast.onMessage = { [weak self] msg in
             self?.applyRemoteMessage(msg)
         }
-        // On launch, if a remote timer is already running, adopt it.
-        // version > 0 guards against adopting a default-initialised record.
-        if let s = stateSync.currentState(),
-           s.deviceID != stateSync.deviceID,
+        // On launch, adopt the shared state if we're locally idle and
+        // the stored state is meaningful (version > 0, non-idle). NO
+        // deviceID filter here — at startup our in-memory state is empty,
+        // so adopting a previous own-device write IS the recovery path
+        // we want. The deviceID/version filtering only matters for
+        // steady-state echo-suppression in checkForRemote().
+        if !isActive,
+           let s = stateSync.currentState(),
            s.version > 0,
            s.phase != StoredTimerState.Phase.idle {
-            applyRemoteState(s)
+            // Stale running snapshot (would have completed before now)?
+            // Push idle so all devices converge on "session over" rather
+            // than presenting a ghost timer.
+            if s.isRunning, let end = s.endTime, end.timeIntervalSinceNow < -5 {
+                stateSync.pushIdle()
+            } else {
+                applyRemoteState(s)
+            }
         }
 
         #if canImport(UIKit)

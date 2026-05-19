@@ -43,13 +43,30 @@ class TimerManager: ObservableObject {
             stateSync?.onRemoteChange = { [weak self] state in
                 self?.applyRemoteState(state)
             }
-            // On launch, adopt any remote running timer (only if it has a
-            // meaningful version — version 0 means default/uninitialised).
-            if let s = stateSync?.currentState(),
-               s.deviceID != stateSync?.deviceID,
+            // On launch, adopt the shared state if (a) we're idle locally
+            // and (b) the stored state is meaningful (version > 0, not idle).
+            //
+            // We DON'T filter by `deviceID != self` here — that filter is for
+            // *steady-state* echoes, where we want to ignore our own writes
+            // bouncing back via CloudKit. At startup we have no in-memory
+            // state to clobber, and adopting our own previously-written
+            // state is exactly the recovery we want: e.g., user starts a
+            // break on Mac, app gets killed, Mac re-launches → we should
+            // pick up where we left off rather than show idle while the
+            // CK record says "break running".
+            if !isActive,
+               let s = stateSync?.currentState(),
                s.version > 0,
                s.phase != StoredTimerState.Phase.idle {
-                applyRemoteState(s)
+                // Stale running snapshot (would have completed before now)?
+                // Don't adopt as paused-with-leftover — that just shows a
+                // ghost timer the user can't get rid of. Push idle so all
+                // devices converge on "session over, fresh start."
+                if s.isRunning, let end = s.endTime, end.timeIntervalSinceNow < -5 {
+                    stateSync?.pushIdle()
+                } else {
+                    applyRemoteState(s)
+                }
             }
         }
     }
@@ -492,6 +509,11 @@ class TimerManager: ObservableObject {
         timer?.cancel()
         timer = nil
         isRunning = false
+        // Tell peers we're done with this phase so their shared state
+        // doesn't remain in the stale "running with past endTime" form.
+        // Auto-break / Keep-Going will overwrite this with a fresh start
+        // a moment later if applicable.
+        pushIdleEverywhere()
 
         if let start = sessionStartTime {
             let type: WorkSession.SessionType = currentPhase == .work ? .work : .shortBreak
@@ -630,15 +652,29 @@ class TimerManager: ObservableObject {
     // MARK: - Checkpoint
 
     private func saveCheckpoint() {
-        guard currentPhase == .work, let start = sessionStartTime else { clearCheckpoint(); return }
+        // Persist both work AND break in-progress so a kill-and-relaunch
+        // recovers the timer regardless of phase. Previously only work
+        // was checkpointed, which meant if Mac was killed during a break,
+        // it'd boot showing idle (and the user had no way to resume).
+        guard let start = sessionStartTime else { clearCheckpoint(); return }
         var data: [String: Any] = [
             "sessionStartTime": start.timeIntervalSince1970,
             "elapsedBeforePause": elapsedBeforePause,
             "totalTime": totalTime,
-            "currentLabel": currentLabel
+            "currentLabel": currentLabel,
+            "currentPhase": phaseKey(currentPhase),
+            "currentBreakKinds": currentBreakKinds.map(\.rawValue),
         ]
         if let resume = lastResumeTime { data["lastResumeTime"] = resume.timeIntervalSince1970 }
         UserDefaults.standard.set(data, forKey: Self.checkpointKey)
+    }
+
+    private func phaseKey(_ p: Phase) -> String {
+        switch p {
+        case .work: return "work"
+        case .shortBreak: return "shortBreak"
+        case .longBreak: return "longBreak"
+        }
     }
 
     private func clearCheckpoint() {
@@ -667,21 +703,35 @@ class TimerManager: ObservableObject {
         }
 
         let label = (data["currentLabel"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let phaseRaw = data["currentPhase"] as? String ?? "work"
+        let restoredPhase: Phase = {
+            switch phaseRaw {
+            case "shortBreak": return .shortBreak
+            case "longBreak":  return .longBreak
+            default:           return .work
+            }
+        }()
+        let kindsRaw = (data["currentBreakKinds"] as? [String]) ?? []
+        let restoredKinds = kindsRaw.compactMap { BreakKind(rawValue: $0) }
         let remaining = total - elapsed
 
         // If the session would have finished while the app was dead, save it as completed.
         if elapsed >= total {
             if total >= 60 {
+                let sessionType: WorkSession.SessionType = restoredPhase == .work ? .work : .shortBreak
                 store.addSession(WorkSession(
                     startTime: Date(timeIntervalSince1970: startEpoch),
-                    durationMinutes: total / 60.0, type: .work, label: label
+                    durationMinutes: total / 60.0, type: sessionType,
+                    label: restoredPhase == .work ? label : nil,
+                    breakKinds: restoredPhase == .work ? nil : (restoredKinds.isEmpty ? nil : restoredKinds)
                 ))
             }
             return
         }
 
         // Session still has time left — restore the live timer state.
-        currentPhase       = .work
+        currentPhase       = restoredPhase
+        currentBreakKinds  = restoredKinds
         totalTime          = total
         timeRemaining      = remaining
         elapsedBeforePause = elapsed
