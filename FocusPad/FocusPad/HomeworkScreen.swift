@@ -8,7 +8,12 @@ struct HomeworkScreen: View {
     @Query(sort: \StoredHomework.date, order: .reverse) private var items: [StoredHomework]
     @State private var showAdd = false
     @State private var showStat110 = false
-    @State private var prefill: AddHomeworkSheet.Prefill? = nil
+    /// Drives the prefilled add-sheet via `.sheet(item:)` so the sheet's
+    /// lifetime is atomically tied to the prefill payload. Avoids the
+    /// race we hit with separate `showAdd` + `prefill` state where the
+    /// sheet could briefly present with the previous (empty) prefill
+    /// before the new value propagated.
+    @State private var prefilledAdd: AddHomeworkSheet.Prefill? = nil
     @State private var searchText = ""
 
     private var todayCount: Int {
@@ -91,27 +96,35 @@ struct HomeworkScreen: View {
                         Haptics.tap(); showStat110 = true
                     } label: { Label("Browse Stat 110", systemImage: "books.vertical") }
                     Button {
-                        Haptics.tap(); prefill = nil; showAdd = true
+                        Haptics.tap(); showAdd = true
                     } label: { Label("Add manually", systemImage: "square.and.pencil") }
                 } label: {
                     Image(systemName: "plus")
                 }
             }
         }
+        // Manual-add path: blank sheet, no prefill.
         .sheet(isPresented: $showAdd) {
+            AddHomeworkSheet(prefill: nil)
+        }
+        // Catalog-pick path: the sheet's identity IS the prefill, so the
+        // sheet only presents once the payload is in place, with the
+        // correct title/source/catalogID at first render.
+        .sheet(item: $prefilledAdd) { prefill in
             AddHomeworkSheet(prefill: prefill)
         }
         .sheet(isPresented: $showStat110) {
             Stat110PickerSheet(completedIDs: completedCatalogIDs) { picked in
-                showStat110 = false
-                prefill = AddHomeworkSheet.Prefill(
+                // Set the prefill first, then dismiss the picker. SwiftUI
+                // sees prefilledAdd flip non-nil and presents the add
+                // sheet directly with the correct payload — no manual
+                // showAdd toggle, no delay, no empty flash.
+                prefilledAdd = AddHomeworkSheet.Prefill(
                     title: picked.title,
                     source: picked.sourceLabel,
                     catalogID: picked.id
                 )
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    showAdd = true
-                }
+                showStat110 = false
             }
         }
         .background(Color(.systemGroupedBackground).ignoresSafeArea())
@@ -241,7 +254,12 @@ private struct HomeworkRow: View {
 }
 
 struct AddHomeworkSheet: View {
-    struct Prefill: Equatable {
+    /// Identifiable so SwiftUI can drive a `.sheet(item:)` off it — the
+    /// sheet only presents when this is non-nil, and the prefill is
+    /// guaranteed to arrive at first render rather than racing a
+    /// separately-tracked `showAdd` flag.
+    struct Prefill: Identifiable, Equatable {
+        var id: String { catalogID ?? title }
         var title: String = ""
         var source: String = ""
         var catalogID: String? = nil

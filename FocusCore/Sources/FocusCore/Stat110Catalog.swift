@@ -75,7 +75,7 @@ public struct Stat110ProblemSet: Identifiable, Hashable, Sendable {
 }
 
 public enum Stat110Catalog {
-    public static let all: [Stat110ProblemSet] = [hw2]
+    public static let all: [Stat110ProblemSet] = [hw2, hw3]
 
     public static func problemSet(number: Int) -> Stat110ProblemSet? {
         all.first { $0.setNumber == number }
@@ -153,5 +153,67 @@ private let hw2: Stat110ProblemSet = .init(
         .init(id: "stat110-hw2-hw-6", setNumber: 2, kind: .homework,
               topic: nil, number: "6",
               title: "Two-child puzzle with birth-month — March-born girl variants"),
+    ]
+)
+
+// MARK: - HW3 (Fall 2011)
+// Source: https://stat110.hsites.harvard.edu/sites/g/files/omnuum10111/files/stat110/files/strategic_practice_and_homework_3.pdf
+
+private let hw3: Stat110ProblemSet = .init(
+    setNumber: 3,
+    title: "Strategic Practice & Homework 3",
+    pdfURL: "https://stat110.hsites.harvard.edu/sites/g/files/omnuum10111/files/stat110/files/strategic_practice_and_homework_3.pdf",
+    problems: [
+        // --- Strategic Practice 3 ---
+        .init(id: "stat110-hw3-sp-1.1", setNumber: 3, kind: .strategicPractice,
+              topic: "Continuing with Conditioning", number: "1.1",
+              title: "Biased Monty Hall — opens Door 2 with prob p; switching odds (a,b,c)"),
+        .init(id: "stat110-hw3-sp-1.2", setNumber: 3, kind: .strategicPractice,
+              topic: "Continuing with Conditioning", number: "1.2",
+              title: "True/False on independence of X,Y,Z (a,b,c,d)"),
+
+        .init(id: "stat110-hw3-sp-2.1", setNumber: 3, kind: .strategicPractice,
+              topic: "Simpson's Paradox", number: "2.1",
+              title: "Can P(A|E)<P(B|E), P(A|Eᶜ)<P(B|Eᶜ) yet P(A)>P(B)? (a, b)"),
+        .init(id: "stat110-hw3-sp-2.2", setNumber: 3, kind: .strategicPractice,
+              topic: "Simpson's Paradox", number: "2.2",
+              title: "Lisa, Homer & Stampy — ivory dealer Simpson's setup (a,b,c)"),
+
+        .init(id: "stat110-hw3-sp-3.1", setNumber: 3, kind: .strategicPractice,
+              topic: "Gambler's Ruin", number: "3.1",
+              title: "Quit when ahead by $2; show P(ever ahead by $2) < 1/4"),
+
+        .init(id: "stat110-hw3-sp-4.1", setNumber: 3, kind: .strategicPractice,
+              topic: "Bernoulli and Binomial", number: "4.1",
+              title: "World Series — P(A wins series); does 7-game assumption matter?"),
+        .init(id: "stat110-hw3-sp-4.2", setNumber: 3, kind: .strategicPractice,
+              topic: "Bernoulli and Binomial", number: "4.2",
+              title: "n Bernoulli trials — given #successes, all sequences equally likely"),
+        .init(id: "stat110-hw3-sp-4.3", setNumber: 3, kind: .strategicPractice,
+              topic: "Bernoulli and Binomial", number: "4.3",
+              title: "X+Y is Bin; X−Y isn't; P(X=k | X+Y=j) (a,b,c)"),
+
+        // --- Homework 3 ---
+        .init(id: "stat110-hw3-hw-1", setNumber: 3, kind: .homework,
+              topic: nil, number: "1",
+              title: "7-door (then n-door, m-goat) Monty Hall — should you switch?"),
+        .init(id: "stat110-hw3-hw-2", setNumber: 3, kind: .homework,
+              topic: nil, number: "2",
+              title: "Bayes' rule in odds form — medical test, one-step vs. two-step update"),
+        .init(id: "stat110-hw3-hw-3", setNumber: 3, kind: .homework,
+              topic: nil, number: "3",
+              title: "P(Aᵢ|B)>P(Aᵢ|C) but P(A₁∪A₂|B)<P(A₁∪A₂|C) — possible? story"),
+        .init(id: "stat110-hw3-hw-4", setNumber: 3, kind: .homework,
+              topic: nil, number: "4",
+              title: "Calvin & Hobbes, win-by-two — P(Calvin wins) by LOTP + gambler's ruin"),
+        .init(id: "stat110-hw3-hw-5", setNumber: 3, kind: .homework,
+              topic: nil, number: "5",
+              title: "Fair die running total — recursive pₙ, find p₇, show pₙ → 2/7"),
+        .init(id: "stat110-hw3-hw-6", setNumber: 3, kind: .homework,
+              topic: nil, number: "6",
+              title: "A vs B trivia turns — PMFs; first-correct-wins, P(A wins)"),
+        .init(id: "stat110-hw3-hw-7", setNumber: 3, kind: .homework,
+              topic: nil, number: "7",
+              title: "Noisy channel with parity bit — P(undetected errors), closed form"),
     ]
 )
