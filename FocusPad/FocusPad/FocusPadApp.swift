@@ -29,6 +29,12 @@ struct FocusPadApp: App {
         let removed = FocusMigration.dedupeWorkSessions(container: c)
         if removed > 0 { print("[FocusPad] startup dedup removed \(removed) duplicate session(s)") }
 
+        // Recover orphan rows that lack CloudKit metadata (NSPersistentCloudKit
+        // didn't track them, so they won't sync). Re-inserts through SwiftData
+        // so the export pipeline picks them up.
+        let recovered = FocusMigration.recoverOrphanSessions(container: c)
+        if recovered > 0 { print("[FocusPad] startup recovered \(recovered) orphan session(s) for CK sync") }
+
         let s = PadSettings()
         _settings = StateObject(wrappedValue: s)
         _engine = StateObject(wrappedValue: FocusTimerEngine(

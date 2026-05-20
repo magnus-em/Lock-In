@@ -1,5 +1,8 @@
 import Foundation
 import SwiftData
+#if canImport(SQLite3)
+import SQLite3
+#endif
 
 /// One-shot migration from the legacy JSON-file-based persistence to SwiftData.
 /// Reads the JSON files in the given directory (typically `~/Library/Application Support/Focus/`),
@@ -58,6 +61,107 @@ public enum FocusMigration {
         public var dayRecords: Int = 0
         public var scratch: Int = 0
         public var alreadyMigrated: Bool = false
+    }
+
+    /// Recover SwiftData rows that exist locally but never got CloudKit
+    /// metadata (so they're invisible to NSPersistentCloudKit's export
+    /// scheduler and won't sync to peers). This can happen when:
+    ///   - CloudKit setup was failing at the moment of insert (partial
+    ///     failures during a schema-migration window).
+    ///   - A row was inserted via raw SQL bypassing the SwiftData API.
+    ///
+    /// Recovery strategy: for each orphan, deep-copy its fields into a
+    /// brand-new entity (fresh UUID), insert via `context.insert`, save,
+    /// then delete the orphan. The fresh insert flows through SwiftData's
+    /// transaction journal which NSPersistentCloudKit watches — the row
+    /// gets CK metadata and is exported on the next sync cycle.
+    ///
+    /// Strict dedup then collapses any byte-identical CK-imported version
+    /// of the same logical session if/when it arrives from a peer.
+    ///
+    /// Returns the number of rows recovered.
+    @discardableResult
+    public static func recoverOrphanSessions(container: ModelContainer) -> Int {
+        // We can't ask SwiftData "do you have CloudKit metadata for this
+        // row" because that's NSPersistentCloudKit-internal. But we CAN
+        // detect orphans by querying the underlying SQLite store for rows
+        // in the work-session table that lack a corresponding entry in
+        // ANSCKRECORDMETADATA — that's exactly the symptom of the bug.
+        guard let storeURL = container.configurations.first?.url else { return 0 }
+        let orphanIDs = orphanWorkSessionUUIDs(storeURL: storeURL)
+        guard !orphanIDs.isEmpty else { return 0 }
+
+        let ctx = ModelContext(container)
+        guard let all = try? ctx.fetch(FetchDescriptor<StoredWorkSession>()) else { return 0 }
+        var recovered = 0
+        for row in all where orphanIDs.contains(row.id) {
+            let snapshot = row.asValue
+            // Insert a fresh copy first (new UUID) so we never have a
+            // moment where the data is missing. Then delete the orphan.
+            let fresh = StoredWorkSession(value: WorkSession(
+                startTime: snapshot.startTime,
+                durationMinutes: snapshot.durationMinutes,
+                type: snapshot.type,
+                label: snapshot.label,
+                breakKinds: snapshot.breakKinds
+            ))
+            ctx.insert(fresh)
+            ctx.delete(row)
+            recovered += 1
+        }
+        try? ctx.save()
+        return recovered
+    }
+
+    /// Raw SQLite query — finds work-session UUIDs that have no
+    /// corresponding ANSCKRECORDMETADATA row (i.e. NSPersistentCloudKit
+    /// doesn't know they exist).
+    private static func orphanWorkSessionUUIDs(storeURL: URL) -> Set<UUID> {
+        var ids: Set<UUID> = []
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(storeURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+              let db else { return [] }
+        defer { sqlite3_close(db) }
+
+        // ZENTITYID=6 corresponds to StoredWorkSession in this schema.
+        // (Z_PRIMARYKEY confirms it; if SwiftData ever reshuffles entity
+        // numbers, the LEFT JOIN still detects "no CK metadata for this
+        // row" regardless of which entity it belongs to — but we scope to
+        // work sessions only.)
+        let sql = """
+        SELECT hex(s.ZID)
+        FROM ZSTOREDWORKSESSION s
+        LEFT JOIN ANSCKRECORDMETADATA rm
+          ON rm.ZENTITYPK = s.Z_PK AND rm.ZENTITYID = s.Z_ENT
+        WHERE rm.Z_PK IS NULL;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK,
+              let stmt else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let cStr = sqlite3_column_text(stmt, 0) else { continue }
+            let hex = String(cString: cStr)
+            if let uuid = uuidFromHex(hex) { ids.insert(uuid) }
+        }
+        return ids
+    }
+
+    private static func uuidFromHex(_ hex: String) -> UUID? {
+        guard hex.count == 32 else { return nil }
+        var bytes = [UInt8]()
+        var idx = hex.startIndex
+        while idx < hex.endIndex {
+            let next = hex.index(idx, offsetBy: 2)
+            guard let b = UInt8(hex[idx..<next], radix: 16) else { return nil }
+            bytes.append(b)
+            idx = next
+        }
+        return UUID(uuid: (bytes[0], bytes[1], bytes[2], bytes[3],
+                          bytes[4], bytes[5], bytes[6], bytes[7],
+                          bytes[8], bytes[9], bytes[10], bytes[11],
+                          bytes[12], bytes[13], bytes[14], bytes[15]))
     }
 
     public static func migrateIfNeeded(container: ModelContainer, appSupportDir: URL) -> Result {

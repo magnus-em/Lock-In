@@ -34,6 +34,12 @@ private func runOneShotMigration() {
     // double-imports collapse.
     let removed = FocusMigration.dedupeWorkSessions(container: focusContainer)
     if removed > 0 { print("[FocusMigration] startup dedup removed \(removed) duplicate session(s)") }
+
+    // Recover any local rows that lack CloudKit metadata — these are
+    // invisible to NSPersistentCloudKit and won't sync. Re-inserts them
+    // through the SwiftData API so the export pipeline picks them up.
+    let recovered = FocusMigration.recoverOrphanSessions(container: focusContainer)
+    if recovered > 0 { print("[FocusMigration] startup recovered \(recovered) orphan session(s) for CK sync") }
 }
 
 @main
